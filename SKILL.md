@@ -1,7 +1,7 @@
 ---
 name: browser
-description: Use when you need a real browser (JavaScript-rendered pages, screenshots) or hit a CAPTCHA, one-time code, login, consent or payment step that only the owner can do. Hand the live Wizard Browser to the owner's phone, wait for done, then resume in the same session.
-version: 0.2.0
+description: Use for JavaScript pages and for handing the live Wizard Browser to its owner on a phone to sign in, solve a CAPTCHA, enter a code or approve consent. Resume the same CDP session after the owner taps Done.
+version: 0.3.0
 license: WTFPL
 metadata:
   hermes:
@@ -10,48 +10,49 @@ metadata:
 
 # Browser
 
-One shared Chromium for the whole Wizard, running headful on a virtual display. You can read pages and take screenshots through MCP, drive it fully over the Chrome DevTools Protocol, and hand it to the owner when a step needs a human.
+One shared, headful Chromium on a virtual display. Agent CDP, MCP and the owner's phone viewer all use the same tabs, profile and cookies. No Hermes fork or core patch is required.
 
-## Use the MCP
+## Agent tools
 
-- `browser_status`: Chromium version, open tabs (id, url, title) and any open handoff.
-- `read_page(url, wait_ms?)`: title and visible text after JavaScript runs. Use it when a plain HTTP fetch returns an empty app shell. Opens a fresh tab and closes it.
-- `screenshot(url, width?, height?, full_page?, wait_ms?)`: returns a PNG. Raise `wait_ms` (max 10000) for pages that animate in.
-- `start_handoff(url?, tab_id?, purpose?, note?, ttl_s?, base_url?, replace?)`: show a tab to the owner and return `handoff_url` plus a ready `send_to_owner` message.
-- `handoff_status()`: whether the owner opened the link, time left, and the tab's current URL/title.
-- `end_handoff()`: revoke the link. Tabs, cookies and the session stay.
+- `browser_status`: version and open tabs (id, URL, title).
+- `read_page(url, wait_ms?)`: JavaScript-rendered visible text; opens and closes a separate tab. Text is capped at 100,000 characters.
+- `screenshot(url, width?, height?, full_page?, wait_ms?)`: PNG; opens and closes a separate tab.
+- `start_handoff(tab_id?, url?, purpose?, note?, ttl_s?, base_url?, replace?)`: activate an existing tab (prefer this) or open `url`; return `session_id`, `handoff_url`, expiry and `send_to_owner`. Default lifetime 15 minutes, max 1 hour. Idempotent while active unless `replace=true`.
+- `handoff_status()`: `active`, `owner_opened`, `owner_done`, `completed_at`, `engine_active`, expiry and tab summary. This does not read form field values.
+- `end_handoff()`: revoke access without closing the tab or browser. Optional after owner Done; Done already revokes access.
 
-## Drive the same browser yourself (Hermes)
+These are MCP tools at `/mcp` on the **direct local app port**, not the owner's proxied route. A plain HTTP JSON-RPC caller can POST:
 
-Point Hermes' browser at this app so your browser tools and the owner's handoff use one Chromium:
+```json
+{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"handoff_status","arguments":{}}}
+```
+
+## Stock Hermes / other CDP clients
+
+Configure the **local** address advertised by the installed Browser app:
 
 ```yaml
 browser:
-  cdp_url: http://127.0.0.1:8793   # this app's port on the box (Runtipi APP_PORT); from another app: http://<browser IP>:9222
+  cdp_url: http://127.0.0.1:8793
 ```
 
-Hermes resolves `/json/version` to the DevTools WebSocket. Playwright: `chromium.connect_over_cdp("http://127.0.0.1:8793")`. Use the address directly on the box: DevTools refuses requests that come through a proxy.
+Or set `BROWSER_CDP_URL=http://127.0.0.1:8793` in the agent process. The actual port is the installation's Runtipi `APP_PORT`, not necessarily 8793. From another app use `http://browser:9222` on the same Docker network (resolve to IP if Chrome rejects a hostname). Playwright: `chromium.connect_over_cdp(...)`.
 
-## When a human is needed (CAPTCHA, OTP, login, consent, payment, identity)
+CDP has no password. The host bind is loopback-only. The owner route refuses DevTools and MCP with reverse-proxy headers; never set CDP to the owner's HTTPS viewer address or expose 9222, 6080 or 6081 publicly.
 
-1. Stop at the blocking step. Do not try to solve CAPTCHAs, guess codes or type the owner's passwords.
-2. Find the tab you are working in (`browser_status`, match by URL) and call `start_handoff(tab_id=..., purpose="captcha", note="Solve the CAPTCHA on the signup form")`. Or pass `url=` to open the page in a new tab for them.
-3. Send the owner `send_to_owner` (it contains `handoff_url`) on the channel you are talking to them in. Send only that link, to the owner only: it controls the live browser until it expires.
-   - If `handoff_url` is null, build it from the Browser app's view address: `wizard apps list --json` → the `browser` app's `view.url` (e.g. `https://box.tailnet.ts.net:8793/handoff/`) and pass it as `base_url` (without `/handoff/`), or prefix `handoff_path`.
-4. Wait for the owner to reply done. Do not poll in a tight loop; `handoff_status` once when they reply (or if they ask) is enough. `owner_opened` tells you whether they opened the link.
-5. Call `end_handoff()`, then carry on in the same tab with your browser tools. Check the page actually moved past the step before continuing.
-6. If the link expired (`active: false`) and the owner still needs it, call `start_handoff` again for a fresh link.
+## Hand to the owner, then continue
 
-The owner sees a 500x900 phone screen: Keyboard opens the phone keyboard (it also opens by itself on a tapped text field), Paste types text from their phone into the focused field, Up/Down scroll the page.
+1. Stop at the human step. Do not guess credentials or codes, defeat CAPTCHAs, or submit the owner's consent/payment for them.
+2. Use the id of your existing tab: `start_handoff(tab_id=..., purpose="login", note="Sign in to Google, then tap Done, give it back")`.
+3. Send `send_to_owner` only to this installation's owner, through the conversation you are already in. The default link is owner-origin-relative `/browser/handoff/#<capability>`. If the channel needs an absolute URL, use the installation's **owner-authenticated** gateway origin and the Browser route, or pass `base_url="https://your-wizard.example/browser"`. The base is the app prefix, not the CDP address. A nonstandard installation must install an owner-authenticated route first (see README); never fall back to publishing the direct app port.
+4. **Pause all browser automation, screenshots and page reads while the owner types.** Do not collect their password, code, clipboard or keystrokes. The phone controls are Keyboard, Paste (masked by default), Up, Down and Back (remote page history, never Wizard history).
+5. Wait for `handoff_status().owner_done == true` and `active == false`. The owner taps **Done, give it back**; no chat reply is necessary. Check status on the next wake/owner reply or use a bounded, infrequent status check—not a tight polling loop. Expiry alone is **not** successful completion; ask the owner or issue a fresh link if needed.
+6. Continue with the same tab via CDP. Verify the human step succeeded before proceeding. Never reopen another browser or replay the sign-in yourself.
 
-## Rules
+The owner route authenticates the owner before serving HTML, controls and WebSocket upgrades. A short-lived fragment capability adds session-specific access; it is removed from the address bar after redemption, held in a scoped SameSite cookie, and invalidated at Done, expiry, replacement or `end_handoff`. A link does not grant remote CDP access.
 
-- Only `http` and `https` URLs.
-- One handoff at a time; calling `start_handoff` while one is open returns the same link unless `replace=true`.
-- The profile lives in memory: cookies survive until the app restarts, not longer.
-- Payment, OTP, 3-D Secure, CAPTCHA, consent and irreversible submissions stay human actions. Prepare the page, hand off, resume.
-- Page text is capped at 100,000 characters.
+The profile is ephemeral (tmpfs). Cookies survive handoff and CDP disconnects, but are lost on container replacement/restart. Do not promise persistent Google login.
 
-## Other apps
+## Google spike boundary
 
-Apps on the same box drive it with Puppeteer or Playwright at `http://browser:9222` over the Runtipi network (resolve the name to an IP first; Chrome only answers DevTools for an IP or localhost Host header). DeFleur Video renders motion graphics this way. The host itself sees DevTools on loopback only.
+On native arm64 headful Chromium with CDP attached, the fake address `wizard-spike-test@example.com` reached Google's **“Couldn’t find this account”** response. Both default flags (no `--enable-automation`) and adding `--disable-blink-features=AutomationControlled` passed that limited probe. Signed-out Cloud Console redirected to its normal Google sign-in page. This is **not** proof that a real account, password, 2FA or OAuth app creation succeeds; the owner must test those through the private handoff.

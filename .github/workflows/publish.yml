@@ -1,4 +1,4 @@
-name: Publish to the Wizard App Index
+name: Browser checks and native images
 on:
   push:
     branches: [main]
@@ -11,48 +11,72 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Generated MCP front is up to date
-        run: python3 mcp/inline.py --check
-      - name: Unit tests (stdlib only)
-        run: python3 -m unittest discover -s tests -p 'test_*.py' -v
-
+      - run: python3 mcp/inline.py --check
+      - run: python3 -m unittest discover -s tests -p 'test_*.py' -v
   engine-image:
-    # The browser-engine image the compose file runs: amd64 + arm64. Pushed only from main.
     needs: checks
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {arch: amd64, runner: ubuntu-24.04}
+          - {arch: arm64, runner: ubuntu-24.04-arm}
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        if: github.event_name != 'pull_request'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: engine/Dockerfile
+          platforms: linux/${{ matrix.arch }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ghcr.io/${{ github.repository_owner }}/browser-engine:sha-${{ github.sha }}-${{ matrix.arch }}
+          cache-from: type=gha,scope=${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
+  manifest:
+    if: github.event_name != 'pull_request'
+    needs: engine-image
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
     steps:
       - uses: actions/checkout@v4
-      - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
-      - name: Log in to GHCR
-        if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
+      - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Image tag from the compose file
-        id: tag
-        run: echo "image=$(grep -oE 'ghcr.io/[^ ]+/browser-engine:[^ ]+' runtipi/docker-compose.yml | head -1)" >> "$GITHUB_OUTPUT"
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: engine/Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.tag.outputs.image }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
+      - name: Publish immutable candidate (never promote a branch to stable)
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/browser-engine
+          SHA: ${{ github.sha }}
+        run: docker buildx imagetools create -t "$IMAGE:sha-$SHA" "$IMAGE:sha-$SHA-amd64" "$IMAGE:sha-$SHA-arm64"
+      - name: Promote approved main only
+        if: github.ref == 'refs/heads/main'
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/browser-engine
+          SHA: ${{ github.sha }}
+        run: |
+          VERSION=$(python3 -c "import re; print(re.search(r'^version: (.+)$',open('wizard.md').read(),re.M)[1])")
+          docker buildx imagetools create -t "$IMAGE:$VERSION" "$IMAGE:sha-$SHA-amd64" "$IMAGE:sha-$SHA-arm64"
   publish:
-    if: github.event_name != 'pull_request'
-    needs: engine-image
+    if: github.ref == 'refs/heads/main'
+    needs: manifest
     runs-on: ubuntu-latest
     steps:
-      - name: Publish (the index re-reads this repo and runs the wizard.md check)
+      - name: Update app index only after both native images exist
         run: |
           curl -sS --fail-with-body -X POST https://apps.aiwizards.com/v1/publish \
             -H 'content-type: application/json' \

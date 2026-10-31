@@ -6,13 +6,15 @@
   <meta name="robots" content="noindex,nofollow,noarchive">
   <meta name="theme-color" content="#0B0B0D">
   <title>Browser handoff</title>
+  <link rel="stylesheet" href="tokens.css">
+  <script defer src="/wizard-os-home/core/app-client.js"></script>
   <style>
     :root { color-scheme: dark; }
-    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #0B0B0D;
-           color: #F2F2F2; font: 16px/1.45 system-ui, -apple-system, sans-serif; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: var(--wz-base);
+           color: var(--wz-text); font: 16px/1.45 system-ui, -apple-system, sans-serif; }
     main { max-width: 22rem; padding: 1.5rem; text-align: center; }
     h1 { font-size: 1.15rem; margin: 0 0 .5rem; }
-    p { margin: .4rem 0; color: rgba(242,242,242,.72); }
+    p { margin: .4rem 0; color: var(--wz-text-secondary); }
   </style>
 </head>
 <body>

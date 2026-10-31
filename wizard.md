@@ -9,7 +9,7 @@ version: 2.0.0
 summary: A shared Chrome for agents and apps; hands the live browser to you on your phone for CAPTCHAs, codes and logins.
 icon: icon.png
 license: WTFPL
-source: https://github.com/oscarhenrycollins/browser
+source: https://github.com/humanitylabs-org/browser
 runtime:
   kind: runtipi
   config: runtipi/config.json

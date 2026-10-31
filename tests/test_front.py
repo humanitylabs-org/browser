@@ -64,7 +64,7 @@ class RouteTests(unittest.TestCase):
         url, path = self.f["_link"](h, "https://box.example.ts.net:8793/handoff/")
         self.assertEqual(path, "/handoff/#" + "A" * 32)
         self.assertEqual(url, "https://box.example.ts.net:8793/handoff/#" + "A" * 32)
-        self.assertIsNone(self.f["_link"](h, None)[0])
+        self.assertEqual(self.f["_link"](h, None)[0], "/browser/handoff/#" + "A" * 32)
 
     def test_existing_tools_still_listed(self):
         names = set(self.f["TOOLS"])

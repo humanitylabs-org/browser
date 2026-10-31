@@ -1,4 +1,4 @@
-import UI from './client-1.3.0/app/ui.js';
+import UI from './client-1.3.0/app/ui.js?v=20260822-19';
 const app = window.WizardApp;
 if (app) {
   app.ready({name: 'Browser', version: '2.0.0'});
@@ -30,7 +30,7 @@ document.getElementById('wizard_done').onclick = async (event) => {
     if (UI.rfb) UI.rfb.disconnect();
     document.cookie = 'browser_handoff=; Max-Age=0; path=' + root + '; SameSite=Strict';
     note.textContent = 'Your agent has the browser back.';
-    if (app && app.hosted) app.nav.back();
+    // Keep the returned-session receipt in Wizard; navigation remains shell-owned.
   } catch (_) {
     note.textContent = 'Could not return the browser. Try again.';
     button.disabled = false;

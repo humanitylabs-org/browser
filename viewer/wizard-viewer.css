@@ -4,7 +4,7 @@ html, body { background: var(--wz-base); color: var(--wz-text); font-family: var
 html[data-presentation="window"] body { background: transparent; }
 #noVNC_container { background: transparent; }
 #tailnet_mobile_bar, #tailnet_paste_sheet, #wizard_handoff_actions, #wizard_done_status, #noVNC_status {
-  background: var(--wz-panel, var(--wz-base)); color: var(--wz-text); border-color: var(--wz-border); backdrop-filter: none; -webkit-backdrop-filter: none;
+  background: var(--wz-base); color: var(--wz-text); border-color: var(--wz-border); backdrop-filter: none; -webkit-backdrop-filter: none;
 }
 #tailnet_mobile_bar { height: calc(76px + env(safe-area-inset-bottom)); }
 #tailnet_mobile_bar button, #tailnet_paste_close, .tailnet_sheet_actions button { color: var(--wz-text); background: var(--wz-panel-raised, var(--wz-panel, var(--wz-base))); border-color: var(--wz-border); }

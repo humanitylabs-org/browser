@@ -155,7 +155,7 @@ import threading
 
 CONTROL_PORT = int(os.environ.get("ENGINE_CONTROL_PORT", "6081"))
 VNC_WS_PORT = int(os.environ.get("ENGINE_VNC_WS_PORT", "6080"))
-PUBLIC_URL = os.environ.get("BROWSER_PUBLIC_URL", "").strip().rstrip("/")
+PUBLIC_URL = os.environ.get("BROWSER_PUBLIC_URL", "").strip().rstrip("/") or "/browser"
 HANDOFF_PREFIX = "/handoff"
 COOKIE = "browser_handoff"
 PURPOSES = ("captcha", "login", "otp", "consent", "payment", "verification", "other")
