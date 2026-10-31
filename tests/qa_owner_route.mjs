@@ -8,11 +8,11 @@ const out=process.env.OUT||'qa-out'; fs.mkdirSync(out,{recursive:true});
 const origin='http://127.0.0.1:18894';
 const owner=req=>String(req.headers.cookie||'').split(';').some(c=>c.trim()==='qa_owner=yes');
 const assets={
- '/wizard-os-home/core/app-client.js': [process.env.WIZARD_APP_CLIENT||'tests/wizard-app-client.js','text/javascript'],
+ '/wizard-os-home/core/app-client.js': [process.env.WIZARD_APP_CLIENT||'tests/fixtures/wizard-app-client.js','text/javascript'],
  '/wizard-os-home/kit/wizard-tokens.css': ['viewer/tokens.css','text/css'],
  '/wizard-os-home/kit/wizard-ui.css': ['viewer/wizard-ui.css','text/css'],
 };
-const shell=`<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/wizard-os-home/kit/wizard-tokens.css"><style>body{margin:0;background:var(--wz-base);color:var(--wz-text);font:16px system-ui}header{height:48px;padding:0 12px;display:flex;align-items:center}iframe{width:100%;height:calc(100dvh - 48px);border:0}</style></head><body><header>Wizard · Browser</header><iframe title="Browser"></iframe><script>
+const shell=`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/wizard-os-home/kit/wizard-tokens.css"><style>body{margin:0;background:var(--wz-base);color:var(--wz-text);font:16px system-ui}header{height:48px;padding:0 12px;display:flex;align-items:center}iframe{width:100%;height:calc(100dvh - 48px);border:0}</style></head><body><header>Wizard · Browser</header><iframe title="Browser"></iframe><script>
 window.shellBacks=0;
 window.WizAppServices={connect:(w,c)=>(window.hostBack=c.back, {ready:()=>({version:1,hosted:true}),nav:{back:()=>{window.shellBacks++}},theme:{current:()=>null,subscribe:()=>()=>{}}})};
 window.setSkin=(skin)=>{document.documentElement.dataset.skin=skin;const cs=getComputedStyle(document.documentElement);let tokens={};for(const k of ['canvas','base','chrome','overlay','surface','surface-raised','text','text-secondary','text-muted','border','accent','accent-soft','on-accent','reader-surface']){let v=cs.getPropertyValue('--wz-'+k).trim();if(v==='transparent')v='rgba(0,0,0,0)';tokens[k]=v;}window.revision=(window.revision||0)+1;document.querySelector('iframe').contentWindow.postMessage({type:'wizard:appearance',appearance:{version:1,revision:window.revision,skin,presentation:'window',colorScheme:'dark',tokens}},location.origin)};

@@ -40,9 +40,37 @@ jobs:
           file: engine/Dockerfile
           platforms: linux/${{ matrix.arch }}
           push: ${{ github.event_name != 'pull_request' }}
+          load: true
           tags: ghcr.io/${{ github.repository_owner }}/browser-engine:sha-${{ github.sha }}-${{ matrix.arch }}
           cache-from: type=gha,scope=${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Native mobile/CDP/owner-route acceptance
+        env:
+          APP_PORT: '18793'
+          BASE: http://127.0.0.1:18793
+          OUT: qa-out
+          IMAGE: ghcr.io/${{ github.repository_owner }}/browser-engine:sha-${{ github.sha }}-${{ matrix.arch }}
+        run: |
+          mkdir -p qa-out
+          python3 -c 'import json,os; open("qa-out/ci.override.json","w").write(json.dumps({"services":{"browser-engine":{"image":os.environ["IMAGE"]}}}))'
+          docker compose -p browser-ci -f runtipi/docker-compose.yml -f qa-out/ci.override.json up -d
+          npm install --no-save playwright@1.56.1
+          npx playwright install --with-deps chromium
+          node tests/qa_handoff.mjs
+          node tests/qa_owner_route.mjs
+          docker image inspect "$IMAGE" > qa-out/image.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-browser-${{ matrix.arch }}
+          path: qa-out/
+          retention-days: 7
+      - name: Remove test containers
+        if: always()
+        run: docker compose -p browser-ci -f runtipi/docker-compose.yml -f qa-out/ci.override.json down --remove-orphans || true
   manifest:
     if: github.event_name != 'pull_request'
     needs: engine-image

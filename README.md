@@ -52,8 +52,8 @@ python3 -m unittest discover -s tests -p 'test_*.py' -v
 npm install --no-save playwright-core
 # Supply a native local Chromium path (do not run amd64 Chromium via QEMU).
 BASE=http://127.0.0.1:18793 CHROME=/path/to/native/Chromium node tests/qa_handoff.mjs
-# Copy the actual shared app-client.js from the Wizard source/installed owner shell:
-cp /path/to/wizard-ux/web/core/app-client.js tests/wizard-app-client.js
+# Uses the unmodified shared-client snapshot in tests/fixtures by default.
+# Optional: WIZARD_APP_CLIENT=/path/to/current/wizard-ux/web/core/app-client.js
 BASE=http://127.0.0.1:18793 CHROME=/path/to/native/Chromium node tests/qa_owner_route.mjs
 BASE=http://127.0.0.1:18793 SPIKE_CONFIG=default node tests/google_spike.mjs
 APP_PORT=18793 docker compose -p browser-handoff-qa -f runtipi/docker-compose.yml -f tests/arm64.override.yml down
