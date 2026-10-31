@@ -1,0 +1,25 @@
+/* noVNC owns framebuffer/input; Wizard Appearance owns its surrounding chrome. */
+#noVNC_status.noVNC_status_normal, #noVNC_status.noVNC_status_error, #noVNC_status.noVNC_status_warn {
+  background: var(--wz-panel, var(--wz-base)); color: var(--wz-text);
+}
+.wizard_returned #noVNC_transition, .wizard_returned #noVNC_connect_dlg, .wizard_returned #noVNC_status, .wizard_returned #noVNC_container { display: none !important; }
+.wizard_returned #wizard_done_status { top: 25%; padding: 1rem; font-size: 1.1rem; }
+
+:root { color-scheme: dark; --tailnet-bar-height: 122px; --tailnet-accent: var(--wz-accent); --tailnet-accent-soft: var(--wz-accent-soft); }
+html, body { background: var(--wz-base); color: var(--wz-text); font-family: var(--wz-font-ui, system-ui); }
+html[data-presentation="window"] body { background: transparent; }
+#noVNC_container { background: transparent; }
+#tailnet_mobile_bar, #tailnet_paste_sheet, #wizard_handoff_actions, #wizard_done_status, #noVNC_status {
+  background: var(--wz-base); color: var(--wz-text); border-color: var(--wz-border); backdrop-filter: none; -webkit-backdrop-filter: none;
+}
+#tailnet_mobile_bar { height: calc(76px + env(safe-area-inset-bottom)); }
+#tailnet_mobile_bar button, #tailnet_paste_close, .tailnet_sheet_actions button { color: var(--wz-text); background: var(--wz-panel-raised, var(--wz-panel, var(--wz-base))); border-color: var(--wz-border); }
+#tailnet_paste_text { color: var(--wz-text); background: var(--wz-panel, var(--wz-base)); border-color: var(--wz-border); }
+.tailnet_sheet_meta { color: var(--wz-text-muted); }
+#tailnet_paste_send { color: var(--wz-on-accent, var(--wz-base)); background: var(--wz-accent); }
+#wizard_handoff_actions { position: fixed; z-index: 41; bottom: calc(var(--tailnet-keyboard-inset, 0px) + 76px + env(safe-area-inset-bottom)); left: 0; right: 0; height: 46px; display: flex; gap: 8px; padding: 0 8px; box-sizing: border-box; }
+#wizard_handoff_actions button { min-height: 44px; border: 1px solid var(--wz-border); border-radius: var(--wz-radius, 12px); color: var(--wz-text); background: var(--wz-panel, var(--wz-base)); font: 600 .875rem var(--wz-font-ui); }
+#wizard_remote_back { flex: 1; } #wizard_done { flex: 3; }
+#wizard_done_status { position: fixed; z-index: 42; top: 0; left: 0; right: 0; margin: 0; text-align: center; }
+#wizard_done_status:empty { display: none; }
+html[data-skin="signal"] button, html[data-skin="signal"] #tailnet_paste_sheet { border-radius: 2px !important; font-family: var(--wz-font-mono, var(--wz-font-ui)) !important; }

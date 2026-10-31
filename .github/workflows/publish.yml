@@ -1,16 +1,113 @@
-name: Publish to the Wizard App Index
+name: Browser checks and native images
 on:
   push:
     branches: [main]
+  pull_request:
   workflow_dispatch:
+permissions:
+  contents: read
 jobs:
-  publish:
+  checks:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Generated MCP front is up to date
-        run: python3 mcp/inline.py --check
-      - name: Publish (the index re-reads this repo and runs the wizard.md check)
+      - run: python3 mcp/inline.py --check
+      - run: python3 -m unittest discover -s tests -p 'test_*.py' -v
+  engine-image:
+    needs: checks
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {arch: amd64, runner: ubuntu-24.04}
+          - {arch: arm64, runner: ubuntu-24.04-arm}
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        if: github.event_name != 'pull_request'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: engine/Dockerfile
+          platforms: linux/${{ matrix.arch }}
+          push: ${{ github.event_name != 'pull_request' }}
+          load: true
+          tags: ghcr.io/${{ github.repository_owner }}/browser-engine:sha-${{ github.sha }}-${{ matrix.arch }}
+          cache-from: type=gha,scope=${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Native mobile/CDP/owner-route acceptance
+        env:
+          APP_PORT: '18793'
+          BASE: http://127.0.0.1:18793
+          OUT: qa-out
+          WIZARD_APP_CLIENT: ${{ runner.temp }}/browser-app-client.js
+          IMAGE: ghcr.io/${{ github.repository_owner }}/browser-engine:sha-${{ github.sha }}-${{ matrix.arch }}
+        run: |
+          mkdir -p qa-out
+          python3 -c 'import json,os; open("qa-out/ci.override.json","w").write(json.dumps({"services":{"browser-engine":{"image":os.environ["IMAGE"]}}}))'
+          docker compose -p browser-ci -f runtipi/docker-compose.yml -f qa-out/ci.override.json up -d
+          npm install --no-save playwright@1.56.1
+          npx playwright install --with-deps chromium
+          curl -fLsS https://raw.githubusercontent.com/humanitylabs-org/wizard-ux/d5f290f220674a862a0465f84a3997955fe51d3b/web/core/app-client.js -o "$WIZARD_APP_CLIENT"
+          printf '%s  %s\n' e7008f44ae81ab459233c055a46da65eb7ddd8305b04333eac838e7e51cd247a "$WIZARD_APP_CLIENT" | sha256sum -c -
+          node tests/qa_handoff.mjs
+          node tests/qa_owner_route.mjs
+          docker image inspect "$IMAGE" > qa-out/image.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-browser-${{ matrix.arch }}
+          path: qa-out/
+          retention-days: 7
+      - name: Remove test containers
+        if: always()
+        run: docker compose -p browser-ci -f runtipi/docker-compose.yml -f qa-out/ci.override.json down --remove-orphans || true
+  manifest:
+    if: github.event_name != 'pull_request'
+    needs: engine-image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish immutable candidate (never promote a branch to stable)
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/browser-engine
+          SHA: ${{ github.sha }}
+        run: docker buildx imagetools create -t "$IMAGE:sha-$SHA" "$IMAGE:sha-$SHA-amd64" "$IMAGE:sha-$SHA-arm64"
+      - name: Promote approved main only
+        if: github.ref == 'refs/heads/main'
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/browser-engine
+          SHA: ${{ github.sha }}
+        run: |
+          VERSION=$(python3 -c "import re; print(re.search(r'^version: (.+)$',open('wizard.md').read(),re.M)[1])")
+          docker buildx imagetools create -t "$IMAGE:$VERSION" "$IMAGE:sha-$SHA-amd64" "$IMAGE:sha-$SHA-arm64"
+  publish:
+    if: github.ref == 'refs/heads/main'
+    needs: manifest
+    runs-on: ubuntu-latest
+    steps:
+      - name: Update app index only after both native images exist
         run: |
           curl -sS --fail-with-body -X POST https://apps.aiwizards.com/v1/publish \
             -H 'content-type: application/json' \

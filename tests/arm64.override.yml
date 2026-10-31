@@ -1,0 +1,5 @@
+services:
+  browser-engine:
+    image: browser-handoff:arm64
+    environment:
+      CHROMIUM_FLAGS: ${CHROMIUM_FLAGS:-}
