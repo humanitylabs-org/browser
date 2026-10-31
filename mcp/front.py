@@ -109,6 +109,10 @@ async def mcp(reader, writer, method, rest):
         if ":" in line:
             k, v = line.split(":", 1)
             headers[k.strip().lower()] = v.strip()
+    # Owner-facing routes must never expose agent tools, even when the reverse proxy
+    # is accidentally configured with a broad prefix. Internal agents call directly.
+    if any(k in ("forwarded", "via", "x-real-ip") or k.startswith(("x-forwarded-", "tailscale-user-")) for k in headers):
+        return await respond(writer, 403, {"error": "MCP is box-only"})
     if MCP_TOKEN:
         import hmac
         if not hmac.compare_digest(headers.get("authorization", "").encode(), ("Bearer " + MCP_TOKEN).encode()):

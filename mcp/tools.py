@@ -188,7 +188,7 @@ def _engine(method, path, obj=None, timeout=30):
 def _active():
     """The current handoff, or {} once it has expired or the engine has dropped it."""
     h = HANDOFF
-    if not h or time.time() >= h["expires_at"]:
+    if not h or h.get("owner_done") or time.time() >= h["expires_at"]:
         return {}
     return h
 
@@ -202,10 +202,11 @@ def _link(h, base_url=None):
 
 
 def _handoff_public(h=None, include_link=False):
-    h = h if h is not None else _active()
+    h = h if h is not None else HANDOFF
     if not h:
         return {"active": False}
-    out = {"active": True, "session_id": h["session_id"], "purpose": h["purpose"], "note": h["note"],
+    out = {"active": bool(_active()), "owner_done": bool(h.get("owner_done")),
+           "completed_at": h.get("completed_at"), "session_id": h["session_id"], "purpose": h["purpose"], "note": h["note"],
            "tab_id": h["tab_id"], "started_at": int(h["started_at"]), "expires_at": int(h["expires_at"]),
            "expires_in_s": max(0, int(h["expires_at"] - time.time())),
            "owner_opened": bool(h.get("opened_at")), "owner_last_seen_s_ago":
@@ -287,20 +288,20 @@ def _owner_message(h):
     url, path = _link(h, h.get("base_url"))
     what = {"captcha": "solve a CAPTCHA", "login": "sign in", "otp": "enter a one-time code", "consent": "approve a consent step",
             "payment": "confirm a payment", "verification": "verify your identity"}.get(h["purpose"], "finish a step")
-    return "I need you to %s in my browser%s: %s  Reply done when finished." % (
+    return "I need you to %s in my browser%s: %s  Tap ‘Done, give it back’ when finished." % (
         what, (" (" + h["note"] + ")") if h["note"] else "", url or path)
 
 
 @tool("handoff_status",
       "Is a human handoff open, has the owner opened the link, how long until it expires, and which page the shared tab is on now.")
 def handoff_status():
-    h = _active()
+    h = HANDOFF
     engine_state = _engine("GET", "/session")
     out = _handoff_public(h)
     out["engine_active"] = bool(engine_state.get("active"))
     if h:
         out["tab"] = _tab_summary(h["tab_id"])
-        if not engine_state.get("active"):
+        if not engine_state.get("active") and not h.get("owner_done"):
             out["active"] = False
             out["detail"] = "the viewer stopped (expired or the engine restarted); start a new handoff if still needed"
     return out
@@ -343,6 +344,15 @@ def route(method, target, headers):
             if ok:
                 h["seen_at"] = time.time()
             return ("respond", 200, {"active": bool(h), "authorized": ok}, "")
+        if rest == "/done":
+            if method != "POST":
+                return ("respond", 405, {"error": "use POST"}, "Allow: POST\r\n")
+            with HANDOFF_LOCK:
+                if not _authorized(headers):
+                    return ("respond", 401, {"error": "handoff ended or invalid"}, "")
+                _engine("DELETE", "/session")
+                HANDOFF.update(owner_done=True, completed_at=int(time.time()))
+            return ("respond", 200, {"ok": True, "owner_done": True}, "")
         if rest == "/websockify" or rest.startswith("/control/"):
             if not _authorized(headers):
                 return ("respond", 401, {"error": "this handoff link has ended or is not valid"}, "")
@@ -359,7 +369,7 @@ def route(method, target, headers):
         return ("proxy", UP_HOST, CONTROL_PORT, rest, ("cookie", "authorization"), [])
     # DevTools has no password. Other apps and the host call it directly; anything arriving through a
     # reverse proxy (Tailscale Serve, the Wizard gateway) is a remote client and gets no DevTools.
-    if any(k in headers for k in PROXY_HEADERS):
+    if any(k in PROXY_HEADERS or k.startswith(("x-forwarded-", "tailscale-user-")) for k in headers):
         return ("respond", 403, {"error": "DevTools is only for apps on this box; the owner's page is /handoff/"}, "")
     return None
 

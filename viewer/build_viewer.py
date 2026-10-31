@@ -784,4 +784,6 @@ ui_path.write_text(ui.replace(stock_close, kept_close, 1), encoding="utf-8")
 
 # Keep touch input on the real noVNC -> RFB -> X11 path (paced native taps).
 patch_rfb_taps(client / "core" / "rfb.js")
+from wizard_viewer import integrate
+integrate(root)
 print("built", root)

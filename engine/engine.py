@@ -515,6 +515,13 @@ class Control(BaseHTTPRequestHandler):
                                                                     body.get("ttl", 900))})
             if not HANDOFF.active():
                 return self._send(409, {"ok": False, "error": "no-active-handoff"})
+            if parsed.path == "/control/back":
+                page = visible_page()
+                history = _cdp_to_page(page, {"id": 1, "method": "Page.getNavigationHistory"})["result"]
+                index = history["currentIndex"]
+                if index > 0:
+                    _cdp_to_page(page, {"id": 2, "method": "Page.navigateToHistoryEntry", "params": {"entryId": history["entries"][index - 1]["id"]}})
+                return self._send(200, {"ok": True, "went_back": index > 0})
             if parsed.path == "/control/scroll":
                 direction = query.get("direction", [""])[0]
                 if direction not in ("up", "down"):
