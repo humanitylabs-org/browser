@@ -23,15 +23,18 @@ document.getElementById('wizard_remote_back').onclick = async () => {
 document.getElementById('wizard_done').onclick = async (event) => {
   const button = event.currentTarget;
   button.disabled = true;
+  UI.inhibitReconnect = true;
   try {
     const response = await fetch(root + 'done', {method: 'POST', credentials: 'same-origin'});
     if (!response.ok) throw new Error('not completed');
+    document.documentElement.classList.add('wizard_returned');
     UI.closeTailnetPasteSheet();
     if (UI.rfb) UI.rfb.disconnect();
     document.cookie = 'browser_handoff=; Max-Age=0; path=' + root + '; SameSite=Strict';
     note.textContent = 'Your agent has the browser back.';
     // Keep the returned-session receipt in Wizard; navigation remains shell-owned.
   } catch (_) {
+    UI.inhibitReconnect = false;
     note.textContent = 'Could not return the browser. Try again.';
     button.disabled = false;
   }

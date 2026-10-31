@@ -1,4 +1,10 @@
 /* noVNC owns framebuffer/input; Wizard Appearance owns its surrounding chrome. */
+#noVNC_status.noVNC_status_normal, #noVNC_status.noVNC_status_error, #noVNC_status.noVNC_status_warn {
+  background: var(--wz-panel, var(--wz-base)); color: var(--wz-text);
+}
+.wizard_returned #noVNC_transition, .wizard_returned #noVNC_connect_dlg, .wizard_returned #noVNC_status, .wizard_returned #noVNC_container { display: none !important; }
+.wizard_returned #wizard_done_status { top: 25%; padding: 1rem; font-size: 1.1rem; }
+
 :root { color-scheme: dark; --tailnet-bar-height: 122px; --tailnet-accent: var(--wz-accent); --tailnet-accent-soft: var(--wz-accent-soft); }
 html, body { background: var(--wz-base); color: var(--wz-text); font-family: var(--wz-font-ui, system-ui); }
 html[data-presentation="window"] body { background: transparent; }
