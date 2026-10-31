@@ -42,7 +42,7 @@ s = s.replace(
     'content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"',
     'content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content"',
 )
-s = s.replace("</head>", '  <meta name="theme-color" content="#0B0B0D" />\n  <meta name="robots" content="noindex,nofollow" />\n</head>', 1)
+s = s.replace("</head>", '  <meta name="robots" content="noindex,nofollow" />\n</head>', 1)
 p.write_text(s, encoding="utf-8")
 
 # Keep the stock noVNC transport while replacing its side drawer with a
@@ -512,20 +512,20 @@ paste_css = '''
   box-sizing: border-box;
   min-height: 44px;
   padding: 10px 12px;
-  font-size: 16px;
+  font-size: 1rem;
 }
 .noVNC_clipboard_reveal {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   min-height: 36px;
-  font-size: 14px;
+  font-size: 0.875rem;
 }
 .noVNC_clipboard_help {
   margin: 4px 0 10px;
   max-width: 500px;
-  color: rgb(80, 80, 80);
-  font-size: 13px;
+  color: var(--wz-text-secondary);
+  font-size: 0.8125rem;
   line-height: 1.35;
 }
 .noVNC_clipboard_actions {
@@ -542,9 +542,9 @@ paste_css = '''
 }
 :root {
   --tailnet-bar-height: 76px;
-  --tailnet-accent: #8ab4f8;
-  --tailnet-accent-soft: rgba(138,180,248,.12);
-  --tailnet-panel: #12151a;
+  --tailnet-accent: var(--wz-accent);
+  --tailnet-accent-soft: var(--wz-accent-soft);
+  --tailnet-panel: var(--wz-panel, var(--wz-base));
 }
 #noVNC_control_bar_anchor {
   display: none !important;
@@ -572,11 +572,11 @@ paste_css = '''
   align-items: stretch;
   gap: 2px;
   padding: 6px 6px calc(6px + env(safe-area-inset-bottom));
-  border-top: 1px solid rgba(255,255,255,.12);
-  background: rgba(14,17,22,.97);
-  box-shadow: 0 -8px 28px rgba(0,0,0,.36);
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
+  border-top: 1px solid var(--wz-border);
+  background: var(--wz-panel, var(--wz-base));
+  box-shadow: var(--wz-shadow);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 #tailnet_mobile_bar button {
   min-width: 0;
@@ -590,9 +590,9 @@ paste_css = '''
   padding: 4px 1px 3px;
   border: 0;
   border-radius: 12px;
-  color: rgba(255,255,255,.74);
+  color: var(--wz-text-secondary);
   background: transparent;
-  font: 650 10.5px/1 system-ui, -apple-system, sans-serif;
+  font: 650 0.65625rem/1 var(--wz-font-ui);
   letter-spacing: .01em;
   touch-action: manipulation;
   user-select: none;
@@ -631,11 +631,11 @@ paste_css = '''
   max-width: 480px;
   margin: 0 auto;
   padding: 14px;
-  border: 1px solid rgba(255,255,255,.14);
+  border: 1px solid var(--wz-border);
   border-radius: 18px;
-  color: #f1f4f8;
-  background: rgba(18,21,26,.98);
-  box-shadow: 0 16px 48px rgba(0,0,0,.58);
+  color: var(--wz-text);
+  background: var(--wz-panel, var(--wz-base));
+  box-shadow: var(--wz-shadow);
   opacity: 0;
   pointer-events: none;
   transform: translateY(18px) scale(.98);
@@ -657,7 +657,7 @@ paste_css = '''
   margin-bottom: 11px;
 }
 .tailnet_sheet_header strong {
-  font: 700 16px/1.2 system-ui, -apple-system, sans-serif;
+  font: 700 1rem/1.2 var(--wz-font-ui);
 }
 #tailnet_paste_close {
   width: 36px;
@@ -666,9 +666,9 @@ paste_css = '''
   padding: 0;
   border: 0;
   border-radius: 50%;
-  color: rgba(255,255,255,.75);
-  background: rgba(255,255,255,.08);
-  font: 300 27px/1 system-ui, sans-serif;
+  color: var(--wz-text-secondary);
+  background: var(--wz-surface);
+  font: 300 1.6875rem/1 var(--wz-font-ui);
 }
 #tailnet_paste_text {
   box-sizing: border-box;
@@ -676,11 +676,11 @@ paste_css = '''
   min-height: 48px;
   margin: 0;
   padding: 11px 13px;
-  border: 1px solid rgba(255,255,255,.18);
+  border: 1px solid var(--wz-border);
   border-radius: 12px;
-  color: #fff;
-  background: #20252d;
-  font: 16px/1.3 system-ui, -apple-system, sans-serif;
+  color: var(--wz-text);
+  background: var(--wz-panel, var(--wz-base));
+  font: 1rem/1.3 var(--wz-font-ui);
 }
 #tailnet_paste_text.tailnet_masked {
   -webkit-text-security: disc;
@@ -693,8 +693,8 @@ paste_css = '''
   justify-content: space-between;
   gap: 12px;
   min-height: 38px;
-  color: rgba(255,255,255,.58);
-  font: 12px/1.2 system-ui, -apple-system, sans-serif;
+  color: var(--wz-text-muted);
+  font: 0.75rem/1.2 var(--wz-font-ui);
 }
 .tailnet_visibility_toggle {
   display: inline-flex;
@@ -712,13 +712,13 @@ paste_css = '''
   box-sizing: border-box;
   width: 15px;
   height: 15px;
-  border: 1px solid rgba(255,255,255,.42);
+  border: 1px solid var(--wz-border);
   border-radius: 4px;
 }
 .tailnet_visibility_toggle[aria-pressed="true"] .tailnet_visibility_mark {
   border-color: var(--tailnet-accent);
   background: var(--tailnet-accent);
-  box-shadow: inset 0 0 0 3px #20252d;
+  box-shadow: inset 0 0 0 3px var(--wz-panel, var(--wz-base));
 }
 .tailnet_sheet_actions {
   gap: 8px;
@@ -728,14 +728,14 @@ paste_css = '''
   flex: 1 1 0;
   margin: 0;
   padding: 8px 12px;
-  border: 1px solid rgba(255,255,255,.15);
+  border: 1px solid var(--wz-border);
   border-radius: 12px;
-  color: #f5f5f6;
-  background: #252b34;
-  font: 700 14px/1 system-ui, -apple-system, sans-serif;
+  color: var(--wz-text);
+  background: var(--wz-surface-raised);
+  font: 700 0.875rem/1 var(--wz-font-ui);
 }
 .tailnet_sheet_actions button.tailnet_primary {
-  color: #0b1220;
+  color: var(--wz-on-accent);
   border-color: var(--tailnet-accent);
   background: var(--tailnet-accent);
 }
@@ -752,7 +752,7 @@ paste_css = '''
 }
 @media (max-width: 360px) {
   #tailnet_mobile_bar button {
-    font-size: 9.5px;
+    font-size: 0.59375rem;
   }
   #tailnet_mobile_bar svg {
     width: 23px;

@@ -7,7 +7,7 @@ def integrate(root):
     client = root / 'client-1.3.0'
     html = client / 'vnc.html'
     text = html.read_text()
-    text = text.replace('</head>', '''<link rel="stylesheet" href="../tokens.css">
+    text = text.replace('</head>', '''<link rel="stylesheet" href="../wizard-tokens.css">
 <link rel="stylesheet" href="../wizard-ui.css">
 <link rel="stylesheet" href="../wizard-viewer.css">
 <script defer src="/wizard-os-home/core/app-client.js"></script>
@@ -17,5 +17,5 @@ def integrate(root):
     <nav id="tailnet_mobile_bar"''')
     html.write_text(text)
     source = Path(__file__).parent
-    for name in ('tokens.css', 'wizard-ui.css', 'wizard-viewer.css', 'wizard-viewer.js'):
+    for name in ('wizard-tokens.css', 'wizard-ui.css', 'wizard-viewer.css', 'wizard-viewer.js'):
         (root / name).write_bytes((source / name).read_bytes())

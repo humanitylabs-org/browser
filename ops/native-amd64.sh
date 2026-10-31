@@ -21,7 +21,12 @@ for i in range(60):
   time.sleep(1)'
 # All Chrome processes here are amd64 on amd64, never QEMU. Use the matching
 # Playwright package/browser cache and an isolated disposable QA container.
-docker run --rm --network host --ipc=host -v "$PWD:/work" -w /work \
+# Fetch the genuine shared client outside the app source, not a forked runtime copy.
+SHARED_CLIENT="$PWD/../browser-handoff-shared-client.js"
+curl -fLsS https://raw.githubusercontent.com/humanitylabs-org/wizard-ux/d5f290f220674a862a0465f84a3997955fe51d3b/web/core/app-client.js -o "$SHARED_CLIENT"
+printf '%s  %s\n' e7008f44ae81ab459233c055a46da65eb7ddd8305b04333eac838e7e51cd247a "$SHARED_CLIENT" | sha256sum -c -
+docker run --rm --network host --ipc=host -v "$PWD:/work" -v "$SHARED_CLIENT:/shared/app-client.js:ro" -w /work \
+  -e WIZARD_APP_CLIENT=/shared/app-client.js \
   -e BASE=http://127.0.0.1:18793 -e OUT=qa-out \
   mcr.microsoft.com/playwright:v1.56.1-noble \
   bash -ec 'npm install --no-save playwright-core@1.56.1; node tests/qa_handoff.mjs; node tests/qa_owner_route.mjs' \

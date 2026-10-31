@@ -8,8 +8,8 @@ const out=process.env.OUT||'qa-out'; fs.mkdirSync(out,{recursive:true});
 const origin='http://127.0.0.1:18894';
 const owner=req=>String(req.headers.cookie||'').split(';').some(c=>c.trim()==='qa_owner=yes');
 const assets={
- '/wizard-os-home/core/app-client.js': [process.env.WIZARD_APP_CLIENT||'tests/fixtures/wizard-app-client.js','text/javascript'],
- '/wizard-os-home/kit/wizard-tokens.css': ['viewer/tokens.css','text/css'],
+ '/wizard-os-home/core/app-client.js': [process.env.WIZARD_APP_CLIENT||'../browser-handoff-shared-client.js','text/javascript'],
+ '/wizard-os-home/kit/wizard-tokens.css': ['viewer/wizard-tokens.css','text/css'],
  '/wizard-os-home/kit/wizard-ui.css': ['viewer/wizard-ui.css','text/css'],
 };
 const shell=`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/wizard-os-home/kit/wizard-tokens.css"><style>body{margin:0;background:var(--wz-base);color:var(--wz-text);font:16px system-ui}header{height:48px;padding:0 12px;display:flex;align-items:center}iframe{width:100%;height:calc(100dvh - 48px);border:0}</style></head><body><header>Wizard · Browser</header><iframe title="Browser"></iframe><script>

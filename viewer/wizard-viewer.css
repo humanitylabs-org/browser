@@ -12,8 +12,8 @@ html[data-presentation="window"] body { background: transparent; }
 .tailnet_sheet_meta { color: var(--wz-text-muted); }
 #tailnet_paste_send { color: var(--wz-on-accent, var(--wz-base)); background: var(--wz-accent); }
 #wizard_handoff_actions { position: fixed; z-index: 41; bottom: calc(var(--tailnet-keyboard-inset, 0px) + 76px + env(safe-area-inset-bottom)); left: 0; right: 0; height: 46px; display: flex; gap: 8px; padding: 0 8px; box-sizing: border-box; }
-#wizard_handoff_actions button { min-height: 44px; border: 1px solid var(--wz-border); border-radius: var(--wz-radius, 12px); color: var(--wz-text); background: var(--wz-panel, var(--wz-base)); font: 600 14px system-ui; }
+#wizard_handoff_actions button { min-height: 44px; border: 1px solid var(--wz-border); border-radius: var(--wz-radius, 12px); color: var(--wz-text); background: var(--wz-panel, var(--wz-base)); font: 600 .875rem var(--wz-font-ui); }
 #wizard_remote_back { flex: 1; } #wizard_done { flex: 3; }
 #wizard_done_status { position: fixed; z-index: 42; top: 0; left: 0; right: 0; margin: 0; text-align: center; }
 #wizard_done_status:empty { display: none; }
-html[data-skin="signal"] button, html[data-skin="signal"] #tailnet_paste_sheet { border-radius: 2px !important; font-family: monospace !important; }
+html[data-skin="signal"] button, html[data-skin="signal"] #tailnet_paste_sheet { border-radius: 2px !important; font-family: var(--wz-font-mono, var(--wz-font-ui)) !important; }
