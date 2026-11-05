@@ -19,6 +19,14 @@ NEW (domain data only): single-writer atomic JSON metadata store at `/data/list.
 
 The portable named `reading-list` volume mounts `/data` while root stays read-only and `/tmp` remains tmpfs. Plain Docker copies `/data` ownership from the image (1000:1000). WAM `WizardStorage.rewriteVolumes` turns this named volume into `${APP_DATA_DIR}/volumes/reading-list:/data`, initializing a fresh directory's ownership from the sole Reader user (1000:1000). `BackupManager.createBackupArchive` copies appDataDir recursively, excluding only the root backups directory. Thus `volumes/reading-list/list.json` is included, not a host-global Docker volume that backups miss. An update retains the same source directory and volume key. Before claiming live release, inspect compiled source/mount ownership and inspect a real post-seed WAM backup archive for those bytes; restore/restart acceptance remains a release gate, not a source-only assertion.
 
+## Gate transport and navigation regressions
+
+The isolated shell harness forwards the browser's exact Origin/Fetch Metadata and Host via Node `http.request`, not Node fetch (which replaces Host with the backend authority). Its focused regression exercises the real `mutationGuard`: the old transport gets 403, the authority-preserving transport succeeds for POST/PATCH/DELETE, and hostile/opaque origins still get 403. No CSRF policy is relaxed.
+
+Phone acceptance dismisses the real first-use Review mode coach through **Got it**, waits for its removal, then taps Save with touch input; the first-frame proof is collected before dismissal. A tap that only dismisses onboarding is not a Save action. The gate records Reader request/response metadata, warning/error consoles and frame state on failures.
+
+Reader home/read/Back replace the app-domain `url` parameter to match the displayed state without adding history entries. The desktop shell intentionally skips navigation when a deep link matches a frame's live URL; retaining an article URL while showing Reading list made reopening that same Search result a no-op. Focused UI tests cover home, typed navigation, article links and Back, including history length.
+
 ## Acceptance
 
 Focused unit tests: atomic dedupe/write serialization, restart via new store, corruption refusal, metadata projection, unsafe URL/canonical refusal, JSON/origin/size/method guards, front method/identity isolation, UI optimistic first paint and rollback, reopen refetch, menu outside/Back, read/remove.

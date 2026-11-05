@@ -69,7 +69,16 @@
     if(!article || !listKnown)return;const row=saved();if(row){remove(row);return;}saveArticle({...article});
   };
   function original(url) {$('#original').href=url;$('#source').textContent=url;}
+  function route(url) {
+    // Domain state must match the live document address. Desktop reuses an app
+    // frame when its URL already equals a tapped deep link; a stale article URL
+    // at Reading list root otherwise makes that tap an incorrect no-op.
+    const address=new URL(location.href);
+    if(url)address.searchParams.set('url',url);else address.searchParams.delete('url');
+    history.replaceState(history.state,'',address);
+  }
   function home() {
+    route(null);
     ++sequence;pending?.abort();pending=null;current='';article=null;stack=[];page.hidden=true;$('#library').hidden=false;input.value='';document.title='Browser';
     status.hidden=false;status.textContent='Open a web link or paste an address to read it here.';closeMenus();savePaint();loadList();
   }
@@ -79,6 +88,7 @@
     if(url===current && pending)return;
     const id=++sequence;
     if(remember && current!==url)stack.push(current || null);
+    route(url);
     current=url;article=null;input.value=url;closeMenus();$('#library').hidden=true;
     status.textContent='Reading '+new URL(url).hostname+'…';status.hidden=false;page.hidden=false;savePaint();
     $('#title').textContent='';$('#site').textContent=new URL(url).hostname;$('#byline').textContent='';$('#logo').hidden=true;body.replaceChildren();original(url);

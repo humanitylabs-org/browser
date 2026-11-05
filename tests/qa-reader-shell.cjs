@@ -3,6 +3,7 @@
 // real immutable Reader backend. Owner/agent APIs below are explicitly synthetic;
 // only Reading list writes reach the isolated QA backend (never James's list).
 const fs=require('fs'),path=require('path'),assert=require('assert/strict');
+const {proxyRequest}=require('../reader/test/shell-transport.cjs');
 const {chromium}=require('/opt/reader/node_modules/playwright-core');
 const ROOT=process.env.SOURCE_ROOT||'/sources',OUT=process.env.EVIDENCE||'/evidence';
 const ORIGIN='http://reader-shell.test',WEB=path.join(ROOT,'ux/web'),QA=path.join(ROOT,'qa');
@@ -17,10 +18,10 @@ const row={id:SID,title:'Reader release acceptance',agent:'hermes',status:'compl
 const TYPES={'.css':'text/css','.html':'text/html','.js':'application/javascript','.json':'application/json','.png':'image/png','.jpg':'image/jpeg','.webp':'image/webp','.svg':'image/svg+xml','.woff2':'font/woff2','.webmanifest':'application/manifest+json'};
 const results=[],diagnostics=[];let browser;
 const save=()=>fs.writeFileSync(path.join(OUT,process.env.PERSISTENCE_ONLY?'in-shell-persistence-results.json':'in-shell-results.json'),JSON.stringify({kind:'composed-real-shell-reader',source,searchProvenance:'search-preview e429987349b87d0c6d4973fb482c604765e2434b; real /api/web result recorded from installed provider; only owner APIs synthetic',results,diagnostics},null,2));
-async function test(name,fn,p){try{const data=await fn();results.push({name,ok:true,...(data||{})});console.log('PASS',name);}catch(e){results.push({name,ok:false,error:String(e),stack:e.stack});console.log('FAIL',name,String(e));if(p)await p.screenshot({path:path.join(OUT,name.replace(/[^a-z0-9]/gi,'-')+'-failure.png')}).catch(()=>{});}save();}
+async function test(name,fn,p){try{const data=await fn();results.push({name,ok:true,...(data||{})});console.log('PASS',name);}catch(e){const failure={name,ok:false,error:String(e),stack:e.stack};if(p){failure.frames=await Promise.all(p.frames().filter(f=>f.url().startsWith(ORIGIN)).map(async f=>({url:f.url(),state:await f.evaluate(()=>({title:document.title,status:document.querySelector('#status')?.textContent,error:document.querySelector('#error')?.textContent,pageHidden:document.querySelector('#page')?.hidden,save:document.querySelector('#save')?.outerHTML,reviewCoach:!!document.querySelector('.rv-coach.open')})).catch(()=>null)})));await p.screenshot({path:path.join(OUT,name.replace(/[^a-z0-9]/gi,'-')+'-failure.png')}).catch(()=>{});}results.push(failure);console.log('FAIL',name,String(e));}save();}
 async function boot(phone,skin){
  const ctx=await browser.newContext({viewport:phone?{width:390,height:844}:{width:1440,height:900},deviceScaleFactor:1,isMobile:phone,hasTouch:phone,serviceWorkers:'block',userAgent:phone?'Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 Chrome/155.0.0.0 Mobile Safari/537.36 WizardOS-Android/0.10.9':undefined});
- const d={phone,skin,writes:[],listWrites:[],foreign:[],pageErrors:[],firstFrames:[]};diagnostics.push(d);let release=null,hold=false,listRelease=null,listHold=false;
+ const d={phone,skin,writes:[],listWrites:[],foreign:[],pageErrors:[],firstFrames:[],readerTraffic:[],console:[]};diagnostics.push(d);let release=null,hold=false,listRelease=null,listHold=false;
  await ctx.route('**/*',async r=>{const q=r.request(),u=new URL(q.url()),m=q.method();const json=(x,status=200)=>r.fulfill({status,contentType:'application/json',body:JSON.stringify(x)});
   try{
    if(u.origin==='https://download.example'&&/^\/reader\.(pdf|apk)$/.test(u.pathname))return r.fulfill({status:200,contentType:'application/octet-stream',headers:{'content-disposition':'attachment; filename="'+u.pathname.slice(1)+'"'},body:'Explicit download-routing fixture, not an installable APK or readable PDF.'});
@@ -31,10 +32,11 @@ async function boot(phone,skin){
     if(isList&&m!=='GET'){d.listWrites.push(m+' '+u.pathname);if(listHold)await new Promise(ok=>{listRelease=ok;});}
     if(u.pathname==='/browser/api/reader'&&hold)await new Promise(ok=>{release=ok;});
     const upstream='http://reader-edge:8080'+u.pathname+u.search;
-    const headers={'x-forwarded-for':'100.64.10.20','x-forwarded-proto':'http',host:u.host};
-    for(const k of ['origin','sec-fetch-site','content-type'])if(q.headers()[k])headers[k]=q.headers()[k];
-    const res=await fetch(upstream,{method:m,headers,...(m==='GET'?{}:{body:q.postDataBuffer()})});
-    return r.fulfill({status:res.status,headers:Object.fromEntries([...res.headers].filter(([k])=>!['content-length','transfer-encoding','connection','content-encoding'].includes(k))),body:Buffer.from(await res.arrayBuffer())});
+    const headers={'x-forwarded-for':'100.64.10.20','x-forwarded-proto':'http',host:u.host,'accept-encoding':'identity'};
+    const actual=await q.allHeaders();for(const k of ['origin','sec-fetch-site','content-type'])if(actual[k])headers[k]=actual[k];
+    const res=await proxyRequest(upstream,{method:m,headers,...(m==='GET'?{}:{body:q.postDataBuffer()})});
+    if(u.pathname.includes('/api/'))d.readerTraffic.push({method:m,path:u.pathname+u.search,host:headers.host,origin:headers.origin,fetchSite:headers['sec-fetch-site'],status:res.status,...(res.status>=400?{error:res.body.toString().slice(0,2000)}:{})});
+    return r.fulfill({status:res.status,headers:Object.fromEntries(Object.entries(res.headers).filter(([k])=>!['content-length','transfer-encoding','connection','content-encoding'].includes(k))),body:res.body});
    }
    if(u.pathname.startsWith('/wizard-os-home/')){
     const rel=u.pathname.slice('/wizard-os-home/'.length)||'index.html';const f=path.resolve(WEB,rel);
@@ -61,8 +63,10 @@ async function boot(phone,skin){
    return json({});
   }catch(e){d.routeError=String(e);return r.fulfill({status:500,body:String(e)}).catch(()=>{});}
  });
- await ctx.addInitScript(({phone,skin})=>{
-  if(window!==window.top)return;
+ await ctx.addInitScript(({phone,skin,origin})=>{
+  // CDP shares Chrome with Reader's sandboxed source pages. Seed only the
+  // synthetic Wizard top frame, never those opaque-origin source documents.
+  if(window!==window.top || location.origin!==origin)return;
   for(const [k,v]of Object.entries({'wos.coached':'true','wos.tour.v1':'true','wos.welcome.v1':'done','wos.skin':skin,'wux.shell':phone?'phone':'desktop','wux.desk.homeOpen':'false'}))localStorage.setItem(k,v);
   window.__qaNative=[];window.__qaFirstFrames=[];
   if(phone)window.WizardOSNative={openInBrowser:u=>__qaNative.push(['browser',u]),download:u=>__qaNative.push(['download',u])};
@@ -70,8 +74,8 @@ async function boot(phone,skin){
    const vis=el=>!!el&&getComputedStyle(el).display!=='none'&&el.getClientRects().length>0;
    __qaFirstFrames.push({href,at:performance.now(),veil:[...document.querySelectorAll('.frame-loading')].some(vis),readerFrames:[...document.querySelectorAll('iframe')].filter(f=>f.src.includes('/browser/?url=')).map(f=>({src:f.src,visible:vis(f)}))});
   });},true);
- },{phone,skin});
- const p=await ctx.newPage();p.on('pageerror',e=>d.pageErrors.push(e.message));p.setDefaultTimeout(15000);
+ },{phone,skin,origin:ORIGIN});
+ const p=await ctx.newPage();p.on('pageerror',e=>d.pageErrors.push(e.message));p.on('console',m=>{if(['warning','error'].includes(m.type()))d.console.push({type:m.type(),text:m.text(),location:m.location()});});p.setDefaultTimeout(15000);
  await p.goto(ORIGIN+'/wizard-os-home/'+(phone?'?shell=phone':'desktop.html'));
  await p.waitForFunction(()=>window.WizCore&&WizCore.appsLoaded&&(window.__wux||window.__wos));
  await p.evaluate(()=>WizCore.appsLoaded());
@@ -81,7 +85,7 @@ async function boot(phone,skin){
  return {ctx,p,d,hold:()=>{hold=true;},unhold:()=>{hold=false;release?.();release=null;},holdList:()=>{listHold=true;},unholdList:()=>{listHold=false;listRelease?.();listRelease=null;}};
 }
 async function chat(p,phone){await p.evaluate(({SID,phone})=>{const a=window.__wux||window.__wos;if(!phone)a.openThread(SID);else {const w=Object.values(a.wins).find(w=>w.app==='chats');a.goDesk(a.desks.findIndex(d=>d.wins.includes(w.id)));a.chats.openChat(w.id,SID);}}, {SID,phone});await p.locator(`.bub a[href="${target.url}"]`).first().waitFor({state:'visible'});}
-const frame=p=>p.frames().find(f=>f.url().includes('/browser/?url='));
+const frame=p=>p.frames().find(f=>new URL(f.url()||ORIGIN).pathname.startsWith('/browser/'));
 async function reader(p){await p.waitForFunction(()=>[...document.querySelectorAll('iframe')].some(f=>f.src.includes('/browser/?url=')));const until=Date.now()+10000;while(Date.now()<until){const f=frame(p);if(f){await f.locator('#status').waitFor({state:'attached'});return f;}await new Promise(r=>setTimeout(r,50));}throw Error('Reader frame did not load');}
 async function readDone(f){await f.waitForFunction(()=>document.querySelector('#status').hidden,null,{timeout:45000});assert.ok((await f.locator('#article').innerText()).length>150);}
 async function back(p,phone){if(phone)await p.evaluate(()=>__wos.onBack());else await p.keyboard.press('Escape');await p.waitForTimeout(400);}
@@ -100,15 +104,19 @@ async function back(p,phone){if(phone)await p.evaluate(()=>__wos.onBack());else 
    await p.screenshot({path:path.join(OUT,tag+'-restart-persistence.png')});assert.deepEqual(d.pageErrors,[]);assert.equal(d.listWrites.length,0);return{title:await f.locator('#unread .list-title').innerText()};
   },p);}finally{await ctx.close();}continue;}
   try{
-   await test(tag+'-chat-tap-first-frame',async()=>{await chat(p,phone);h.hold();await p.locator(`.bub a[href="${target.url}"]`).first().click();await p.waitForFunction(()=>__qaFirstFrames.length>0);d.firstFrames=await p.evaluate(()=>__qaFirstFrames);assert.ok(d.firstFrames.at(-1).veil||d.firstFrames.at(-1).readerFrames.some(f=>f.visible),JSON.stringify(d.firstFrames));const f=await reader(p);await f.waitForFunction(()=>document.querySelector('#status').textContent.startsWith('Reading '));await p.screenshot({path:path.join(OUT,tag+'-loading.png')});h.unhold();await readDone(f);await p.screenshot({path:path.join(OUT,tag+'-article.png')});assert.equal(p.url().startsWith(ORIGIN+'/wizard-os-home/'),true);assert.equal(ctx.pages().length,1);return{firstFrame:d.firstFrames.at(-1),title:await f.locator('#title').innerText()};},p);h.unhold();
+   await test(tag+'-chat-tap-first-frame',async()=>{await chat(p,phone);h.hold();await p.locator(`.bub a[href="${target.url}"]`).first().click();await p.waitForFunction(()=>__qaFirstFrames.length>0);d.firstFrames=await p.evaluate(()=>__qaFirstFrames);assert.ok(d.firstFrames.at(-1).veil||d.firstFrames.at(-1).readerFrames.some(f=>f.visible),JSON.stringify(d.firstFrames));const f=await reader(p);await f.waitForFunction(()=>document.querySelector('#status').textContent.startsWith('Reading '));await p.screenshot({path:path.join(OUT,tag+'-loading.png')});h.unhold();await readDone(f);if(phone){const coach=p.getByRole('dialog',{name:'Review mode',exact:true});await coach.getByRole('button',{name:'Got it',exact:true}).click();await coach.waitFor({state:'detached'});assert.equal(await p.locator('.rv-coach').count(),0);}await p.screenshot({path:path.join(OUT,tag+'-article.png')});assert.equal(p.url().startsWith(ORIGIN+'/wizard-os-home/'),true);assert.equal(ctx.pages().length,1);return{firstFrame:d.firstFrames.at(-1),title:await f.locator('#title').innerText()};},p);h.unhold();
    await test(tag+'-reading-list-save-reopen-read-remove',async()=>{
     const f=frame(p);assert.ok(f);await f.locator('#save:not([disabled])').waitFor();
     assert.equal(await f.locator('#save').getAttribute('aria-pressed'),'false');
     await f.evaluate(()=>{window.__savePaint=null;document.querySelector('#save').addEventListener('click',()=>requestAnimationFrame(()=>{window.__savePaint={pressed:document.querySelector('#save').getAttribute('aria-pressed'),label:document.querySelector('#save span').textContent,disabled:document.querySelector('#save').disabled};}),{once:true,capture:true});});
-    h.holdList();await f.locator('#save').click();await f.waitForFunction(()=>window.__savePaint);
+    assert.equal(await p.locator('.rv-coach').count(),0,'Save must receive the tap, not first-use coaching');
+    h.holdList();if(phone)await f.locator('#save').tap();else await f.locator('#save').click();await f.waitForFunction(()=>window.__savePaint);
     const paint=await f.evaluate(()=>__savePaint);assert.deepEqual(paint,{pressed:'true',label:'Saved',disabled:true});
     await p.screenshot({path:path.join(OUT,tag+'-saved-first-paint.png')});h.unholdList();await f.locator('#save:not([disabled])').waitFor({timeout:60000});
+    assert.equal(await f.locator('#save').getAttribute('aria-pressed'),'true','successful persistence must not roll Save back');
+    assert.equal(d.readerTraffic.filter(r=>r.method==='POST'&&r.path==='/browser/api/list'&&r.status===200).length,1);
     await back(p,phone);await f.locator('#library').waitFor({state:'visible'});await f.locator('#unread .list-title').waitFor();
+    assert.equal(new URL(f.url()).searchParams.has('url'),false,'Reading list root must not retain the previous article deep link');
     await p.screenshot({path:path.join(OUT,tag+'-reading-list.png')});
     await f.locator('#unread .list-open').click();await readDone(f);assert.equal(await f.locator('#save').getAttribute('aria-pressed'),'true');
     await p.screenshot({path:path.join(OUT,tag+'-list-reopened.png')});await back(p,phone);await f.locator('#library').waitFor({state:'visible'});
