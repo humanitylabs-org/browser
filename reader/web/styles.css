@@ -1,7 +1,7 @@
 html {color-scheme:dark light;}
 body {margin:0;background:var(--wz-base);color:var(--wz-text);font-family:var(--wz-font-ui);}
 html.wz-hosted body,html.wz-hosted {background:transparent;}
-main.wz-app {padding:calc(var(--wos-cutout,0px) + 20px) 24px 64px;container-type:inline-size;}
+main.wz-app {padding:calc(var(--wos-cutout,0px) + 20px) 24px 64px;container-type:inline-size;max-width:44rem;margin-inline:auto;}
 .reader-mode {display:flex;border-bottom:1px solid var(--wz-border);margin-bottom:20px;padding-bottom:12px;font-weight:600;color:var(--wz-text-secondary);}
 .reader-mode span {color:var(--wz-accent);}
 #address {display:flex;gap:8px;margin-bottom:24px;}

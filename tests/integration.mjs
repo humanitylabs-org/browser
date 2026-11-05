@@ -23,10 +23,20 @@ try {
    await page.goto(origin+'/?url='+encodeURIComponent(url));
    await page.waitForFunction(()=>!document.querySelector('#status').hidden && document.querySelector('#status').textContent.startsWith('Reader could not') || document.querySelector('#status').hidden,null,{timeout:35000});
    const data=await page.evaluate(()=>({title:document.querySelector('#title').textContent,site:document.querySelector('#site').textContent,url:document.querySelector('#source').textContent,body:document.querySelector('#article').textContent.length,images:[...document.querySelectorAll('#article img')].map(i=>i.getAttribute('src')),error:!document.querySelector('#status').hidden?document.querySelector('#status').textContent:'',active:document.querySelectorAll('#article script,#article iframe,#article form,#article [style],#article [onerror]').length}));
+   // Prove images really arrive through the app's own proxy (not just that src was rewritten).
+   const imageCheck=await page.evaluate(async()=>{
+     const imgs=[...document.querySelectorAll('#article img')].slice(0,4);
+     for(const i of imgs){i.loading='eager';i.scrollIntoView();}
+     await Promise.race([Promise.all(imgs.map(i=>i.complete?0:new Promise(r=>{i.onload=i.onerror=r;}))),new Promise(r=>setTimeout(r,15000))]);
+     window.scrollTo(0,0);
+     const statuses=[];for(const i of imgs){try{const r=await fetch(i.getAttribute('src'),{cache:'no-store'});statuses.push(r.status+' '+r.headers.get('content-type'));}catch(e){statuses.push('error '+e.message);}}
+     const logo=document.querySelector('#logo');
+     return {checked:imgs.length,loaded:imgs.filter(i=>i.naturalWidth>0).length,statuses,logo:!logo.hidden && logo.naturalWidth>0};
+   });
    await page.screenshot({path:evidence+'/'+name+'-desktop.png'});
    await page.setViewportSize({width:390,height:844});await page.screenshot({path:evidence+'/'+name+'-phone.png'});await page.setViewportSize({width:1280,height:900});
-   if(!data.title || data.body<150 || data.error || data.active || thirdParty.length || data.images.some(x=>!x.startsWith('api/image?url=')))throw Error(JSON.stringify({...data,thirdParty}));
-   return {...data,thirdParty,screenshots:[name+'-desktop.png',name+'-phone.png']};
+   if(!data.title || data.body<150 || data.error || data.active || thirdParty.length || data.images.some(x=>!x.startsWith('api/image?url=')) || (imageCheck.checked && !imageCheck.loaded))throw Error(JSON.stringify({...data,imageCheck,thirdParty}));
+   return {...data,imageCheck,thirdParty,screenshots:[name+'-desktop.png',name+'-phone.png']};
  });
  await record('reader-follow-link',async()=>{
    await page.goto(origin+'/?url='+encodeURIComponent('https://en.wikipedia.org/wiki/Readability'));

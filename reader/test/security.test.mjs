@@ -34,6 +34,18 @@ test('render-path fetch (follow:false) refuses a redirect into a private address
   });
   await assert.rejects(safeFetch('http://example.com/r',{follow:false,lookup:async()=>[{address:'1.1.1.1',family:4}]}),UnsafeURL);
 });
+test('responsive images keep one proxied src and lose srcset/source',()=>{
+  const html=cleanArticle('<picture><source srcset="https://i.example/a.webp 1x, https://i.example/b.webp 2x"><img alt="a"></picture><img srcset="https://i.example/c.jpg 600w, https://i.example/d.jpg 1200w">','https://example.com/');
+  const doc=new JSDOM(html).window.document;
+  assert.deepEqual([...doc.querySelectorAll('img')].map(i=>i.getAttribute('src')),['api/image?url=https%3A%2F%2Fi.example%2Fa.webp','api/image?url=https%3A%2F%2Fi.example%2Fc.jpg']);
+  assert.equal(doc.querySelectorAll('picture,source,[srcset]').length,0);
+});
+test('site name comes from og:site_name, else the title suffix, never the publisher org',()=>{
+  const body='<article><p>'+'Readable words here. '.repeat(30)+'</p></article>';
+  const a=extract('<html><head><title>Readability - Wikipedia</title><script type="application/ld+json">{"publisher":{"name":"Wikimedia Foundation, Inc."}}</script><link rel="icon" href="/x.svg"><link rel="apple-touch-icon" href="/t.png"></head><body>'+body+'</body></html>','https://en.wikipedia.org/wiki/Readability');
+  assert.equal(a.siteName,'Wikipedia');
+  assert.equal(a.favicon,'api/image?url='+encodeURIComponent('https://en.wikipedia.org/t.png'));
+});
 test('all active content and remote resource attributes are removed',()=>{
  const html=cleanArticle(`<script>window.pwned=true</script><script src="https://evil.example/a.js"></script><p style="background:url(https://evil.example/steal)">Body</p><img src="https://example.com/x.png" onerror="window.pwned=true" srcset="https://evil.example/a 2x"><iframe src="http://localhost"></iframe><form><input autofocus onfocus="window.pwned=true"></form><a href="javascript:window.pwned=true">Bad</a><a href="https://example.com/next">Next</a><svg onload="window.pwned=true"></svg>`, 'https://example.com/');
  const dom=new JSDOM(html,{url:'https://wizard.example/apps/browser/',runScripts:'dangerously'});

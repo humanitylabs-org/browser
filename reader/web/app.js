@@ -4,6 +4,7 @@
   const $=s=>document.querySelector(s), input=$('#url'), status=$('#status'), page=$('#page'), body=$('#article');
   let sequence=0, pending=null, current='', stack=[];
   window.WizardApp?.ready({name:'Browser',version:'1.0.0'});
+  const when=s=>{const d=new Date(s);return s && !isNaN(d) && /\d{4}-\d{2}-\d{2}/.test(s)?d.toLocaleDateString(undefined,{year:'numeric',month:'long',day:'numeric'}):(s||'');};
   function original(url) { $('#original').href=url; $('#source').textContent=url; }
   async function read(url,{remember=true}={}) {
     try {const u=new URL(url);if(!/^https?:$/.test(u.protocol)) throw Error(); url=u.href;} catch {status.textContent='Enter a full http or https web address.';return;}
@@ -20,7 +21,7 @@
       const data=await r.json();if(id!==sequence)return;
       if(!r.ok) throw new Error(data.error || 'Reader could not read this page.');
       $('#title').textContent=data.title;document.title=data.title+' · Browser';$('#site').textContent=data.siteName;
-      $('#byline').textContent=[data.byline,data.publishedTime].filter(Boolean).join(' · ');
+      $('#byline').textContent=[data.byline,when(data.publishedTime)].filter(Boolean).join(' · ');
       original(data.url);$('#logo').hidden=!data.favicon;$('#logo').src=data.favicon || '';
       body.innerHTML=data.html;status.hidden=true;
     } catch(e) {if(id!==sequence || e.name==='AbortError')return;status.hidden=false;status.textContent=e.message+' You can open the original in your browser.';}
