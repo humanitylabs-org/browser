@@ -74,6 +74,6 @@ try {
    if(rpc.error || rpc.result?.isError || !JSON.stringify(rpc).includes('Example Domain'))throw Error(JSON.stringify(rpc));return {rpc};
  });
  await record('proxy-denies-mcp-and-cdp',async()=>{for(const path of ['/mcp','/json/version']){const r=await fetch(origin+path,{headers:{'x-forwarded-for':'100.64.1.1'}});if(r.status!==403)throw Error(path+' '+r.status);}return {};});
-} finally {if(context)await context.close();result.finished=new Date().toISOString();await writeFile(evidence+'/integration.json',JSON.stringify(result,null,2));}
+} finally {if(context)await context.close();if(browser)await browser.close();result.finished=new Date().toISOString();await writeFile(evidence+'/integration.json',JSON.stringify(result,null,2));}
 if(result.cases.some(x=>!x.ok)) process.exitCode=1;
 console.log(JSON.stringify(result,null,2));
