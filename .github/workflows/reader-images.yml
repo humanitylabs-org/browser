@@ -110,7 +110,7 @@ jobs:
           echo "$image@$digest" | tee verified-image.txt
           for arch in amd64 arm64; do
             docker pull --platform linux/$arch "$image@$digest"
-            docker image inspect "$image@$digest" > inspected.json
+            docker image inspect --platform linux/$arch "$image@$digest" > inspected.json
             python3 - "$arch" <<'PY'
           import json,os,sys
           row=json.load(open('inspected.json'))[0]
