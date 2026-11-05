@@ -32,13 +32,14 @@ def run(name, argv, cwd=root, timeout=360):
 
 
 revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip()
-(out / 'source.json').write_text(json.dumps({d: subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=work/d, text=True).strip() for d in ['browser', 'ux', 'store']}, indent=2))
+(out / 'source.json').write_text(json.dumps({d: subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=work/d, text=True).strip() for d in ['browser', 'ux', 'ux-main', 'store']}, indent=2))
 built = run('image-build', ['docker', 'build', '--label', 'org.opencontainers.image.source=https://github.com/humanitylabs-org/browser', '--label', 'org.opencontainers.image.revision=' + revision, '-t', 'wizard-browser-reader:qa', 'reader'], timeout=360)
 run('front-tests', ['python3', '-m', 'unittest', 'discover', '-s', 'tests', '-p', 'test_*.py'])
 run('inline-check', ['python3', 'mcp/inline.py', '--check'])
 if built:
     run('reader-tests', ['docker', 'run', '--rm', '--network', 'none', 'wizard-browser-reader:qa', 'npm', 'test'])
     run('ux-tests', ['docker', 'run', '--rm', '--network', 'none', '-v', str(work/'ux') + ':/work:ro', '-w', '/work', 'wizard-browser-reader:qa', 'sh', '-c', 'node --test tests/*.test.mjs'], timeout=180)
+    run('ux-main-tests', ['docker', 'run', '--rm', '--network', 'none', '-v', str(work/'ux-main') + ':/work:ro', '-w', '/work', 'wizard-browser-reader:qa', 'sh', '-c', 'node --test tests/*.test.mjs'], timeout=180)
     run('store-tests', ['docker', 'run', '--rm', '-v', str(work/'store') + ':/work', '-w', '/work', 'node:22.22.3-bookworm-slim', 'sh', '-c', 'npm ci && ./node_modules/.bin/bun test'], timeout=240)
     override = out / 'compose.json'
     override.write_text(json.dumps({'services': {'browser-reader': {'image': 'wizard-browser-reader:qa'}}}))
