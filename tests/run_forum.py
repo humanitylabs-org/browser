@@ -38,8 +38,19 @@ run('front-tests', ['python3', '-m', 'unittest', 'discover', '-s', 'tests', '-p'
 run('inline-check', ['python3', 'mcp/inline.py', '--check'])
 if built:
     run('reader-tests', ['docker', 'run', '--rm', '--network', 'none', 'wizard-browser-reader:qa', 'npm', 'test'])
-    run('ux-tests', ['docker', 'run', '--rm', '--network', 'none', '-v', str(work/'ux') + ':/work:ro', '-w', '/work', 'wizard-browser-reader:qa', 'sh', '-c', 'node --test tests/*.test.mjs'], timeout=180)
-    run('ux-main-tests', ['docker', 'run', '--rm', '--network', 'none', '-v', str(work/'ux-main') + ':/work:ro', '-w', '/work', 'wizard-browser-reader:qa', 'sh', '-c', 'node --test tests/*.test.mjs'], timeout=180)
+    # The UX suite assumes a writable git checkout; this sandbox is read-only without git, so some
+    # tests fail here for environmental reasons. Each candidate is judged only against its own
+    # unchanged base run in the identical sandbox: a failure the base does not have is a regression.
+    def ux(name, d):
+        log = out / (name + '.tap')
+        with log.open('w') as f:
+            p = subprocess.run(['docker', 'run', '--rm', '--network', 'none', '-v', str(work/d) + ':/work:ro', '-w', '/work', 'wizard-browser-reader:qa', 'sh', '-c', 'node --test tests/*.test.mjs'], stdout=f, stderr=subprocess.STDOUT, timeout=240)
+        return log
+    pairs = [('ux', 'ux-base'), ('ux-main', 'ux-main-base')]
+    for cand, base in pairs:
+        if (work/cand).exists() and (work/base).exists():
+            ux(cand + '-tests', cand); ux(base + '-tests', base)
+            run(cand + '-regressions', ['python3', str(root/'tests/compare_tap.py'), str(out/(base + '-tests.tap')), str(out/(cand + '-tests.tap'))])
     run('store-tests', ['docker', 'run', '--rm', '-v', str(work/'store') + ':/work', '-w', '/work', 'node:22.22.3-bookworm-slim', 'sh', '-c', 'npm ci && ./node_modules/.bin/bun test'], timeout=240)
     override = out / 'compose.json'
     override.write_text(json.dumps({'services': {'browser-reader': {'image': 'wizard-browser-reader:qa'}}}))

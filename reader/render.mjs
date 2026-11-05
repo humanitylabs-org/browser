@@ -1,6 +1,6 @@
 import {chromium} from 'playwright-core';
 import dns from 'node:dns/promises';
-import {safeFetch,destination} from './network.mjs';
+import {safeFetch,destination,UnsafeURL} from './network.mjs';
 import {extract} from './article.mjs';
 
 let connection;
@@ -36,7 +36,7 @@ export async function readArticle(input) {
     });
     const expire=()=>{void context.close().catch(()=>{});}; abort.signal.addEventListener('abort',expire,{once:true});
     await context.routeWebSocket('**/*',route=>route.close());
-    let requests=0, bytes=0, reserved=0, running=0;
+    let requests=0, bytes=0, reserved=0, running=0, blocked=null;
     const waiting=[];
     const acquire=async()=>{if(running<4) {running++;return;} await new Promise(resolve=>waiting.push(resolve));};
     const release=()=>{const next=waiting.shift();if(next)next();else running--;};
@@ -58,13 +58,20 @@ export async function readArticle(input) {
         if(res.headers.location) headers.location=res.headers.location;
         for(const h of ['access-control-allow-origin','access-control-allow-credentials']) if(res.headers[h]) headers[h]=res.headers[h];
         await route.fulfill({status:res.status,headers,body:res.body});
-      } catch { try{await route.abort();}catch{} }
+      } catch(e) {
+        // A main-document redirect into a private address is a refusal, not a read failure.
+        if(e instanceof UnsafeURL && req.isNavigationRequest() && req.frame()===req.frame().page()?.mainFrame()) blocked=e;
+        try{await route.abort();}catch{}
+      }
       finally {reserved-=reservation;if(acquired) release();}
     });
     const page=await context.newPage(); page.setDefaultTimeout(20000);
     page.on('popup',p=>void p.close());
     // Commit the public URL before source JS can initiate client-side navigation.
-    const response=await page.goto(input,{waitUntil:'domcontentloaded',timeout:20000});
+    let response;
+    try { response=await page.goto(input,{waitUntil:'domcontentloaded',timeout:20000}); }
+    catch(e) { if(blocked) throw blocked; throw e; }
+    if(blocked) throw blocked;
     if (!response || response.status()>=400) throw new Error('This site could not be read. Try opening it in your browser.');
     await page.waitForTimeout(1200);
     await destination(page.url());

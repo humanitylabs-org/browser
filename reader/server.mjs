@@ -42,7 +42,11 @@ export const server=http.createServer(async(req,res)=>{
     if(!assets.has(path)) return send(res,404,'{}');
     const type=path.endsWith('.js')?'text/javascript; charset=utf-8':path.endsWith('.css')?'text/css; charset=utf-8':'text/html; charset=utf-8';
     return send(res,200,assets.get(path),type);
-  } catch(e) { return send(res,e instanceof UnsafeURL?400:422,JSON.stringify({error:e instanceof UnsafeURL?e.message:'Reader could not read this page. It may need a sign-in or a check in your browser.'})); }
+  } catch(e) {
+    // Log the real cause for the operator; the owner sees only the plain message.
+    if(!(e instanceof UnsafeURL)) console.error('reader failure:',(e && e.stack) || e);
+    return send(res,e instanceof UnsafeURL?400:422,JSON.stringify({error:e instanceof UnsafeURL?e.message:'Reader could not read this page. It may need a sign-in or a check in your browser.'}));
+  }
 });
 // Every non-intercepted Chrome connection is refused, including CONNECT. This
 // service never forwards a byte from the render browser onto the box network.
