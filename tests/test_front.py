@@ -13,12 +13,16 @@ spec.loader.exec_module(front)
 class FrontTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.calls = []
+        self.bodies = []
         self.connections = []
 
         async def upstream(r, w):
             self.connections.append(w)
             head = await r.readuntil(b'\r\n\r\n')
             self.calls.append(head)
+            headers = head.decode('latin-1').split('\r\n')
+            length = next((int(h.split(':', 1)[1]) for h in headers if h.lower().startswith('content-length:')), 0)
+            self.bodies.append(await r.readexactly(length) if length else b'')
             w.write(b'HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: keep-alive\r\n\r\n{}')
             await w.drain()
             # Deliberately keep Chrome's connection alive; the front must close it.
@@ -73,6 +77,20 @@ class FrontTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(b' 405 ', await self.request('/', headers='Upgrade: websocket\r\n'))
         self.assertIn(b' 405 ', await self.request('/api/reader', 'POST', body=b'{}'))
         self.assertEqual(len(self.calls), 0)
+
+    async def test_list_method_allowlist_and_body_forwarding(self):
+        identity = 'X-Forwarded-For: 100.64.1.1\r\nContent-Type: application/json\r\n'
+        row = '/api/list/12345678-1234-1234-1234-123456789abc'
+        for path, method, body in [('/api/list', 'GET', b''), ('/api/list', 'POST', b'{"url":"https://example.com"}'), (row, 'PATCH', b'{"read":true}'), (row, 'DELETE', b'{}')]:
+            self.assertIn(b' 200 ', await self.request(path, method, identity, body))
+            self.assertEqual(self.bodies[-1], body)
+        count = len(self.calls)
+        for path, method in [('/api/list', 'PUT'), (row, 'POST'), ('/api/list/../mcp', 'POST'), ('/mcp', 'POST'), ('/json/version', 'PATCH'), ('/devtools/test', 'DELETE')]:
+            self.assertRegex(await self.request(path, method, identity, b'{}'), b' (403|405) ')
+        self.assertEqual(len(self.calls), count)
+        self.assertIn(b' 413 ', await self.request('/api/list', 'POST', identity, b'x' * 16385))
+        self.assertIn(b' 405 ', await self.request('/api/list', 'POST', identity + 'Transfer-Encoding: chunked\r\n', b'{}'))
+        self.assertIn(b' 400 ', await self.request('/api/list', 'POST', identity + 'Content-Length: 2\r\n', b'{}'))
 
     async def test_keepalive_cannot_smuggle_second_mcp_request(self):
         r, w = await asyncio.open_connection('127.0.0.1', self.front_port)

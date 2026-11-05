@@ -4,6 +4,9 @@ import {fileURLToPath} from 'node:url';
 import {createHash} from 'node:crypto';
 import {safeFetch,UnsafeURL} from './network.mjs';
 import {readArticle} from './render.mjs';
+import {ListStore} from './list-store.mjs';
+import {listAPI,ListError} from './list-api.mjs';
+const store=new ListStore(process.env.READER_DATA_DIR || '/data');
 
 export const CSP="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; connect-src 'self'; font-src 'self'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'self'";
 const root=fileURLToPath(new URL('./web/',import.meta.url));
@@ -16,9 +19,11 @@ function send(res,status,body,type='application/json') {
 }
 export const server=http.createServer(async(req,res)=>{
   try {
-    if(req.method!=='GET' && req.method!=='HEAD') return send(res,405,'{}');
     const u=new URL(req.url,'http://reader.invalid');
-    if(u.pathname==='/health') return send(res,200,JSON.stringify({ok:true,version:'1.0.0',build}));
+    const list=await listAPI(req,u.pathname,store,readArticle);
+    if(list) return send(res,list.status,JSON.stringify(list.body));
+    if(req.method!=='GET' && req.method!=='HEAD') return send(res,405,'{}');
+    if(u.pathname==='/health') return send(res,200,JSON.stringify({ok:true,version:'1.1.0',build}));
     if(u.pathname==='/api/reader') {
       const article=await readArticle(u.searchParams.get('url'));
       return send(res,200,JSON.stringify(article));
@@ -43,6 +48,7 @@ export const server=http.createServer(async(req,res)=>{
     const type=path.endsWith('.js')?'text/javascript; charset=utf-8':path.endsWith('.css')?'text/css; charset=utf-8':'text/html; charset=utf-8';
     return send(res,200,assets.get(path),type);
   } catch(e) {
+    if(e instanceof ListError) return send(res,e.status,JSON.stringify({error:e.message}));
     // Log the real cause for the operator; the owner sees only the plain message.
     if(!(e instanceof UnsafeURL)) console.error('reader failure:',(e && e.stack) || e);
     return send(res,e instanceof UnsafeURL?400:422,JSON.stringify({error:e instanceof UnsafeURL?e.message:'Reader could not read this page. It may need a sign-in or a check in your browser.'}));
