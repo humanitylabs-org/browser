@@ -13,6 +13,7 @@ import time
 import urllib.parse
 import urllib.request
 import uuid
+import re
 
 APP = os.environ.get("WIZARD_APP", "app")
 VERSION = os.environ.get("APP_VERSION", "0")
@@ -161,9 +162,17 @@ async def handle(reader, writer):
             parsed_headers[k.strip().lower()] = v.strip()
     forwarded = any(k.startswith(("x-forwarded-", "tailscale-user-")) or k in ("forwarded", "via", "x-real-ip", "x-wizard-origin") for k in parsed_headers)
     public_paths = {"/", "/reader", "/index.html", "/app.js", "/styles.css", "/wizard-ui.css", "/wizard-tokens.css", "/boot.js", "/health", "/api/reader", "/api/image"}
-    if path in public_paths:
-        if parts[0] not in ("GET", "HEAD") or parsed_headers.get("upgrade") or parsed_headers.get("transfer-encoding") or int(parsed_headers.get("content-length") or "0") != 0:
-            return await respond(writer, 405, {"error": "GET only"})
+    is_list = path == "/api/list" or bool(re.fullmatch(r"/api/list/[a-f0-9-]{36}", path))
+    if path in public_paths or is_list:
+        allowed = ("GET", "HEAD", "POST") if path == "/api/list" else (("PATCH", "DELETE") if is_list else ("GET", "HEAD"))
+        lengths = [v.split(":", 1)[1].strip() for v in rest.decode("latin-1").split("\r\n") if v.lower().startswith("content-length:")]
+        if len(lengths) > 1 or (lengths and not lengths[0].isdigit()):
+            return await respond(writer, 400, {"error": "invalid request length"})
+        n = int(lengths[0]) if lengths else 0
+        if parts[0] not in allowed or parsed_headers.get("upgrade") or parsed_headers.get("transfer-encoding") or (n and parts[0] in ("GET", "HEAD")):
+            return await respond(writer, 405, {"error": "method not supported"})
+        if n > 16384:
+            return await respond(writer, 413, {"error": "request too large"})
         try:
             ur, uw = await asyncio.open_connection(os.environ.get("READER_HOST", "browser-reader"), int(os.environ.get("READER_PORT", "8080")))
         except OSError:

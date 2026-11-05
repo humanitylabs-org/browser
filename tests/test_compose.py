@@ -11,6 +11,15 @@ def service_block(text, name):
 
 
 class ReaderComposeTest(unittest.TestCase):
+    def test_reading_list_is_a_portable_backup_covered_named_volume(self):
+        text = COMPOSE.read_text()
+        block = service_block(text, 'browser-reader')
+        self.assertIn('- reading-list:/data', block)
+        self.assertIn('READER_DATA_DIR: /data', block)
+        self.assertRegex(text, r'\nvolumes:\n  reading-list: \{\}')
+        self.assertNotIn('external: true', text)
+        self.assertNotIn('driver_opts:', text)
+
     def test_reader_has_writable_tmp_on_read_only_root(self):
         # Playwright's connectOverCDP mkdtemps an artifacts dir in os.tmpdir(); without a
         # tmpfs every Reader request failed on the read-only root (Forum run 1, 5 Nov 2026).

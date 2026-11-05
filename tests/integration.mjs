@@ -83,6 +83,19 @@ try {
    const r=await fetch(origin+'/mcp',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:7,method:'tools/call',params:{name:'read_page',arguments:{url:'https://example.com/'}}})});const rpc=await r.json();
    if(rpc.error || rpc.result?.isError || !JSON.stringify(rpc).includes('Example Domain'))throw Error(JSON.stringify(rpc));return {rpc};
  });
+ await record('reading-list-mcp-and-edge-security',async()=>{
+   const rpc=async(name,args={})=>{const r=await fetch(origin+'/mcp',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:81,method:'tools/call',params:{name,arguments:args}})});const value=await r.json();if(value.error || value.result?.isError)throw Error(JSON.stringify(value));return value;};
+   const added=await rpc('reading_list_add',{url:'https://example.com/'});const listed=await rpc('reading_list_list');
+   let rows=(await (await fetch(origin+'/api/list')).json()).items;if(rows.length!==1 || !JSON.stringify(listed).includes(rows[0].id))throw Error(JSON.stringify({added,listed,rows}));
+   const id=rows[0].id;const edge='http://reader-edge:8080/browser';
+   const change=(p,method,data,headers={})=>fetch(edge+p,{method,headers:{'content-type':'application/json',...headers},body:JSON.stringify(data)});
+   for(const [p,method,data,expected]of [['/api/list','POST',{url:'http://127.0.0.1/'},400],['/api/list/'+id,'PATCH',{read:true},200],['/api/list/'+id,'GET',null,405],['/api/list','PUT',{},405],['/mcp','POST',{},403],['/json/version','POST',{},403],['/devtools/browser/x','POST',{},403]]){
+    const r=method==='GET'?await fetch(edge+p):await change(p,method,data);if(r.status!==expected)throw Error([p,method,r.status,await r.text()].join(' '));
+   }
+   for(const p of ['/mcp','/json/version','/devtools/browser/x']){const r=await fetch(edge+p);if(r.status!==403)throw Error('edge agent GET '+p+' '+r.status);}
+   const csrf=await change('/api/list/'+id,'PATCH',{read:false},{origin:'https://evil.test','sec-fetch-site':'cross-site'});if(csrf.status!==403)throw Error('CSRF '+csrf.status);
+   const removed=await change('/api/list/'+id,'DELETE',{});if(!removed.ok)throw Error(await removed.text());rows=(await (await fetch(origin+'/api/list')).json()).items;if(rows.length)throw Error('Remove did not persist');return{added,listed,edgeMethods:true,csrf:csrf.status};
+ });
  await record('proxy-denies-mcp-and-cdp',async()=>{for(const path of ['/mcp','/json/version']){const r=await fetch(origin+path,{headers:{'x-forwarded-for':'100.64.1.1'}});if(r.status!==403)throw Error(path+' '+r.status);}return {};});
 } finally {if(context)await context.close();if(browser)await browser.close();result.finished=new Date().toISOString();await writeFile(evidence+'/integration.json',JSON.stringify(result,null,2));}
 if(result.cases.some(x=>!x.ok)) process.exitCode=1;
