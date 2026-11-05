@@ -18,6 +18,12 @@ One shared headless Chromium for the whole Wizard. Each call opens a fresh tab a
 - `read_page(url, wait_ms?)`: title and visible text after JavaScript runs. Use it when a plain HTTP fetch returns an empty app shell.
 - `screenshot(url, width?, height?, full_page?, wait_ms?)`: returns a PNG. Raise `wait_ms` (max 10000) for pages that animate in.
 
+## Reader for the owner
+
+Use the installed Browser `view.url` (normally `/browser/`) and append `?url=` plus the percent-encoded public http(s) URL to show a page inside Wizard. Example: `[Read in Browser](/browser/?url=https%3A%2F%2Fen.wikipedia.org%2Fwiki%2FReadability)`. Resolve the installed app view from the registry; do not guess a gateway hostname or put an outside page into a Wizard frame.
+
+Outside chat links and Search results use this same Reader through WizLinks. It shows the source, title, article and proxied images, with **Open in your browser** for sign-ins, bot checks and pages that cannot be extracted. Reader is stateless and cannot see agent cookies. There is no Live viewer in this release. The MCP and CDP interfaces below stay private to the agent network.
+
 ## Rules
 
 - Only `http` and `https` URLs.
