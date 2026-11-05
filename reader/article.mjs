@@ -29,7 +29,7 @@ export function cleanArticle(html, base) {
     return node.innerHTML;
   } finally { dom.window.close(); }
 }
-const suffix = title => { const parts=(title||'').split(/\s+[-|–—·]\s+/); const last=parts.length>1?parts.at(-1).trim():''; return last && last.length<=40 ? last : ''; };
+const suffix = title => { const parts=(title||'').split(/\s+[-|–—·]\s+/); const last=parts.length>1?parts.at(-1).trim():''; return last && last.length<=40 && !/^by\s/i.test(last) ? last : ''; };
 export function extract(renderedHTML, finalURL) {
   const dom=new JSDOM(renderedHTML,{url:finalURL});
   try {

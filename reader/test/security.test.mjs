@@ -44,6 +44,8 @@ test('site name comes from og:site_name, else the title suffix, never the publis
   const body='<article><p>'+'Readable words here. '.repeat(30)+'</p></article>';
   const a=extract('<html><head><title>Readability - Wikipedia</title><script type="application/ld+json">{"publisher":{"name":"Wikimedia Foundation, Inc."}}</script><link rel="icon" href="/x.svg"><link rel="apple-touch-icon" href="/t.png"></head><body>'+body+'</body></html>','https://en.wikipedia.org/wiki/Readability');
   assert.equal(a.siteName,'Wikipedia');
+  const s=extract('<html><head><title>The Shape of the Thing - by Ethan Mollick</title></head><body>'+body+'</body></html>','https://www.oneusefulthing.org/p/x');
+  assert.notEqual(s.siteName,'by Ethan Mollick');
   assert.equal(a.favicon,'api/image?url='+encodeURIComponent('https://en.wikipedia.org/t.png'));
 });
 test('all active content and remote resource attributes are removed',()=>{
