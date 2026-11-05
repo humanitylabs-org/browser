@@ -26,6 +26,14 @@ test('DNS connection is pinned and public redirect to localhost is refused',asyn
   await assert.rejects(safeFetch('http://example.com/redirect',{lookup:async()=>{lookups++;return [{address:'1.1.1.1',family:4}];}}),UnsafeURL);
   assert.equal(requests,1);assert.equal(lookups,1);
 });
+test('render-path fetch (follow:false) refuses a redirect into a private address before Chrome sees it',async t=>{
+  t.mock.method(http,'request',(url,opts,done)=>{
+    const req=new EventEmitter();req.end=()=>{
+      const res=new EventEmitter();Object.assign(res,{statusCode:302,headers:{location:'http://10.2.3.4/'},destroy(){}});done(res);
+    };return req;
+  });
+  await assert.rejects(safeFetch('http://example.com/r',{follow:false,lookup:async()=>[{address:'1.1.1.1',family:4}]}),UnsafeURL);
+});
 test('all active content and remote resource attributes are removed',()=>{
  const html=cleanArticle(`<script>window.pwned=true</script><script src="https://evil.example/a.js"></script><p style="background:url(https://evil.example/steal)">Body</p><img src="https://example.com/x.png" onerror="window.pwned=true" srcset="https://evil.example/a 2x"><iframe src="http://localhost"></iframe><form><input autofocus onfocus="window.pwned=true"></form><a href="javascript:window.pwned=true">Bad</a><a href="https://example.com/next">Next</a><svg onload="window.pwned=true"></svg>`, 'https://example.com/');
  const dom=new JSDOM(html,{url:'https://wizard.example/apps/browser/',runScripts:'dangerously'});

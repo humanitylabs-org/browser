@@ -64,7 +64,7 @@ try {
  });
  await record('api-ssrf',async()=>{
    const blocked=[];
-   for(const url of ['http://127.0.0.1','http://localhost','http://169.254.169.254/latest/meta-data','http://10.2.3.4','http://100.64.1.1','http://browser-engine','file:///etc/passwd','https://httpbingo.org/redirect-to?url=http%3A%2F%2F127.0.0.1']){
+   for(const url of ['http://127.0.0.1','http://localhost','http://169.254.169.254/latest/meta-data','http://10.2.3.4','http://100.64.1.1','http://browser-engine','file:///etc/passwd','http://127.0.0.1.nip.io/','http://10-2-3-4.sslip.io/']){
      const r=await fetch(origin+'/api/reader?url='+encodeURIComponent(url));const body=await r.json();blocked.push({url,status:r.status,body});
      if(r.status!==400)throw Error(JSON.stringify(blocked));
    }return {blocked};
