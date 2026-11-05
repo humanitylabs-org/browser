@@ -57,6 +57,13 @@ class FrontTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn(b' 403 ', await self.request(path, headers='X-Forwarded-For: 100.64.1.1\r\n'))
         self.assertEqual(len(self.calls), 3)
 
+    async def test_all_proxy_identity_headers_refuse_mcp_and_devtools(self):
+        for header in ('X-Forwarded-Surprise: value', 'Tailscale-User-Login: owner', 'Tailscale-User-Custom: value', 'Forwarded: for=100.64.1.1', 'Via: 1.1 proxy'):
+            for path in ('/mcp', '/json/version', '/devtools/browser/test'):
+                with self.subTest(header=header, path=path):
+                    self.assertIn(b' 403 ', await self.request(path, headers=header + '\r\n'))
+        self.assertEqual(len(self.calls), 0)
+
     async def test_direct_mcp_protocol_and_devtools_stay_available(self):
         self.assertIn(b' 200 ', await self.request('/json/version'))
         result = await self.request('/mcp', 'POST', 'Content-Type: application/json\r\n', b'{"jsonrpc":"2.0","id":1,"method":"ping"}')
