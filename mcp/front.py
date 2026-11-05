@@ -1,5 +1,5 @@
-"""Wizard MCP front: serves this app's MCP tools at /mcp and passes every other request,
-byte for byte, to the app behind it (HTTP, streaming and WebSockets alike).
+"""Browser front: private MCP/CDP for agents and an explicit public Reader route allowlist.
+Reader HTML is served by a separate app-domain service; source pages are never proxied here.
 Stdlib only, so it runs on a stock python image with no build step.
 Generated from the app repo's mcp/ folder; edit there, then run mcp/inline.py."""
 import asyncio
@@ -103,6 +103,8 @@ async def mcp(reader, writer, method, rest):
         if ":" in line:
             k, v = line.split(":", 1)
             headers[k.strip().lower()] = v.strip()
+    if any(k.startswith(("x-forwarded-", "tailscale-user-")) or k in ("forwarded", "via", "x-real-ip", "x-wizard-origin") for k in headers):
+        return await respond(writer, 403, {"error": "MCP is only available to agents on the private app network"})
     if MCP_TOKEN:
         import hmac
         if not hmac.compare_digest(headers.get("authorization", "").encode(), ("Bearer " + MCP_TOKEN).encode()):
@@ -152,6 +154,26 @@ async def handle(reader, writer):
     line, _, rest = head.partition(b"\r\n")
     parts = line.decode("latin-1").split(" ")
     path = parts[1].split("?", 1)[0] if len(parts) >= 3 else ""
+    parsed_headers = {}
+    for item in rest.decode("latin-1").split("\r\n"):
+        if ":" in item:
+            k, v = item.split(":", 1)
+            parsed_headers[k.strip().lower()] = v.strip()
+    forwarded = any(k.startswith(("x-forwarded-", "tailscale-user-")) or k in ("forwarded", "via", "x-real-ip", "x-wizard-origin") for k in parsed_headers)
+    public_paths = {"/", "/reader", "/index.html", "/app.js", "/styles.css", "/wizard-ui.css", "/wizard-tokens.css", "/boot.js", "/health", "/api/reader", "/api/image"}
+    if path in public_paths:
+        if parts[0] not in ("GET", "HEAD") or parsed_headers.get("upgrade") or parsed_headers.get("transfer-encoding") or int(parsed_headers.get("content-length") or "0") != 0:
+            return await respond(writer, 405, {"error": "GET only"})
+        try:
+            ur, uw = await asyncio.open_connection(os.environ.get("READER_HOST", "browser-reader"), int(os.environ.get("READER_PORT", "8080")))
+        except OSError:
+            return await respond(writer, 502, {"error": "Reader is starting"})
+        req_lines = [l for l in head.decode("latin-1").split("\r\n") if l and not l.lower().startswith(("connection:", "keep-alive:"))]
+        uw.write(("\r\n".join(req_lines) + "\r\nConnection: close\r\n\r\n").encode("latin-1"))
+        await uw.drain()
+        return await relay_once(reader, writer, ur, uw, req_lines)
+    if forwarded:
+        return await respond(writer, 403, {"error": "DevTools and MCP are private agent interfaces"})
     if path == MCP_PATH:
         return await mcp(reader, writer, parts[0], rest)
     if not UP_HOST:
@@ -168,7 +190,53 @@ async def handle(reader, writer):
         head = ("\r\n".join(lines) + "\r\nConnection: close\r\n\r\n").encode("latin-1")
     uw.write(head)
     await uw.drain()
-    await asyncio.gather(pipe(reader, uw), pipe(ur, writer))
+    if any(l.lower().startswith("upgrade:") for l in lines):
+        await asyncio.gather(pipe(reader, uw), pipe(ur, writer))
+    else:
+        await relay_once(reader, writer, ur, uw, lines)
+
+
+def _length(lines):
+    for l in lines:
+        if l.lower().startswith("content-length:"):
+            try:
+                return max(0, int(l.split(":", 1)[1].strip()))
+            except ValueError:
+                return None
+    return None
+
+
+async def relay_once(reader, writer, ur, uw, req_lines):
+    """Exactly one request and one response, then close both sides: some upstreams (Chrome DevTools) ignore
+    Connection: close, and a client's next request on a kept-alive socket must reach /mcp, not the upstream."""
+    try:
+        n = _length(req_lines)
+        if n:
+            uw.write(await reader.readexactly(n))
+            await uw.drain()
+        elif any(l.lower().startswith("transfer-encoding:") for l in req_lines):
+            asyncio.ensure_future(pipe(reader, uw))
+        head = await ur.readuntil(b"\r\n\r\n")
+        rlines = head.decode("latin-1").split("\r\n")
+        rlines = [l for l in rlines if l and not l.lower().startswith(("connection:", "keep-alive:"))]
+        writer.write(("\r\n".join(rlines) + "\r\nConnection: close\r\n\r\n").encode("latin-1"))
+        rn = _length(rlines[1:])
+        status = rlines[0].split(" ")[1] if len(rlines[0].split(" ")) > 1 else ""
+        if rn is not None or status in ("204", "304") or req_lines[0].startswith("HEAD "):
+            if rn:
+                writer.write(await ur.readexactly(rn))
+            await writer.drain()
+        else:
+            await writer.drain()
+            await pipe(ur, writer)
+    except (asyncio.IncompleteReadError, asyncio.LimitOverrunError, ConnectionError, OSError):
+        pass
+    finally:
+        for w in (uw, writer):
+            try:
+                w.close()
+            except Exception:
+                pass
 
 
 async def main():
