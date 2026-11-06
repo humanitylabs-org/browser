@@ -22,6 +22,12 @@ test('DOM extraction never calls global fetch or executes page JavaScript',t=>{
  const a=extract('<title>Network isolation</title>'+body+'<script>globalThis.__sourceRan=true;fetch("http://127.0.0.1/")</script>','https://example.com/article');
  assert.equal(a.extractor,'defuddle');assert.equal(globalThis.__sourceRan,undefined);
 });
+test('Defuddle favicon metadata uses the guarded bitmap proxy, with SVG fallback',t=>{
+ const parse=t.mock.method(DefuddleClass.prototype,'parse',()=>({title:'Article',content:body,favicon:'https://example.com/library.png'}));
+ assert.equal(extract(body,'https://example.com/article').favicon,'api/image?url=https%3A%2F%2Fexample.com%2Flibrary.png');
+ parse.mock.mockImplementation(()=>({title:'Article',content:body,favicon:'https://example.com/vector.svg'}));
+ assert.equal(extract(body,'https://example.com/article').favicon,'api/image?url=https%3A%2F%2Fexample.com%2Ffavicon.ico');
+});
 test('empty pages fail instead of returning an empty article',()=>assert.throws(()=>extract('<title>Empty</title><body></body>','https://example.com/'),/could not find/));
 test('code, tables, footnote text, math text and lists survive inert HTML cleanup',()=>{
  const html=cleanArticle('<pre><code>const answer = 42;\nconsole.log(answer);</code></pre><table><tr><th>Item</th><td>Value</td></tr></table><p>Formula <code>E = mc^2</code><sup>1</sup></p><ol><li>Footnote text</li></ol><ul><li>List text</li></ul>','https://example.com/');

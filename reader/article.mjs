@@ -39,7 +39,7 @@ export function extract(renderedHTML, finalURL) {
     if(doc.getElementsByTagName('*').length>50000) throw new Error('This page is too large for Reader.');
     // The proxy serves bitmaps only, so prefer bitmap icons over SVG ones.
     const icons=[...doc.querySelectorAll('link[rel~="apple-touch-icon"],link[rel~="icon"]')].filter(l=>!/svg/i.test(l.getAttribute('type')||'') && !/\.svg(\?|$)/i.test(l.getAttribute('href')||''));
-    const icon=icons[0]?.getAttribute('href') || '/favicon.ico';
+    const icon=icons[0]?.getAttribute('href') || '';
     const named=doc.querySelector('meta[property="og:site_name"]')?.content || doc.querySelector('meta[name="application-name"]')?.content || suffix(doc.title);
     const site=named || new URL(finalURL).hostname;
     const canonical=doc.querySelector('link[rel="canonical"]')?.href;
@@ -75,7 +75,8 @@ export function extract(renderedHTML, finalURL) {
     const proxy = value => {try {return 'api/image?url='+encodeURIComponent(webURL(value,finalURL).href);} catch {return '';}};
     // Keep the bitmap icon preference: Defuddle may select an SVG favicon which
     // the deliberately bitmap-only proxy cannot serve.
-    const favicon=proxy(icon || result.favicon);
+    const bitmapIcon=result.favicon && !/\.svg(?:[?#]|$)/i.test(result.favicon) ? result.favicon : '';
+    const favicon=proxy(icon || bitmapIcon || '/favicon.ico');
     let canonicalURL=finalURL; try { if(canonical) canonicalURL=webURL(canonical,finalURL).href; } catch {}
     return {title:result.title || site,siteName:named || result.site || site,url:finalURL,canonicalURL,byline:result.author || '',publishedTime:result.published || date,favicon,image:result.image ? proxy(result.image) : '',description:result.description || '',extractor,html};
   } finally { dom.window.close(); }
