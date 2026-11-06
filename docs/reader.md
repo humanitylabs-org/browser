@@ -24,3 +24,11 @@ The installed core recipe is from `humanitylabs-org/wizard-app-store`, not the `
 The candidate image tag in Compose must be replaced with a verified multiarchitecture digest before release. Do not publish the App Index before both amd64 and arm64 manifests are present. Run `python3 mcp/inline.py` after changing the front. Run `wam check`, Reader tests, front lifecycle tests and core recipe schema tests. Verify the final composed app in the live shell on two skins, including a live change and desktop/phone layouts; standalone screenshots are not that gate.
 
 The later Live implementation can replace only the `browser-engine` service and add its narrowly public viewer routes. Keep the Reader service, isolation policy and explicit original-site escape. No Live tab or noVNC code is included here; the existing handoff PRs and staging containers are untouched.
+
+## When Reader cannot read a page (James, 7 Nov 2026)
+
+`/api/reader` failures return `{error, reason, handoff}`; `reason` is `blocked`, `signin`, `noarticle`, `unavailable`, `private`, `busy` or `invalid` (`reader/handoff.mjs`). The render route classifies the **main document's first response** before Chrome renders it: 401/403/407/429/451, `cf-mitigated: challenge`, small HTML interstitials (Cloudflare "Just a moment…", DataDome captcha, PerimeterX, Incapsula) and redirects to sign-in hosts/paths abort the read at once (about a second, not the 20 s render timeout). Ordinary pages that merely load bot-management scripts are not matched. The body of a refused page never reaches Chrome.
+
+For `handoff:true`, the app clicks a hidden `data-wizard-browse="auto"` anchor so Wizard opens the original immediately (phone: native browser; desktop: only while the owner's tap is fresh, else nothing opens and the visible "Open in your browser" remains). Opened from a link, Reader then returns the owner to where they tapped. Wizard remembers `blocked`/`signin`/`private` hostnames owner-locally to skip Reader for that host next time. `busy`/`invalid` never hand off. Operator logs record only reason and host for these refusals.
+
+Network/SSRF guard, deny hosts, sanitizer, CSP, edge allowlist and list CSRF are unchanged.

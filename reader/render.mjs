@@ -2,6 +2,7 @@ import {chromium} from 'playwright-core';
 import dns from 'node:dns/promises';
 import {safeFetch,destination,UnsafeURL} from './network.mjs';
 import {extract} from './article.mjs';
+import {ReadFailure,documentVerdict} from './handoff.mjs';
 
 let connection;
 export async function chrome() {
@@ -16,7 +17,7 @@ export async function chrome() {
 let active=0;
 export async function readArticle(input) {
   await destination(input);
-  if(active>=2) throw new Error('Reader is busy. Please try again in a moment.');
+  if(active>=2) throw new ReadFailure('Reader is busy. Please try again in a moment.','busy');
   active++;
   let context;
   const abort=new AbortController(); const timer=setTimeout(()=>abort.abort(),25000);
@@ -36,7 +37,7 @@ export async function readArticle(input) {
     });
     const expire=()=>{void context.close().catch(()=>{});}; abort.signal.addEventListener('abort',expire,{once:true});
     await context.routeWebSocket('**/*',route=>route.close());
-    let requests=0, bytes=0, reserved=0, running=0, blocked=null;
+    let requests=0, bytes=0, reserved=0, running=0, blocked=null, verdict=null;
     const waiting=[];
     const acquire=async()=>{if(running<4) {running++;return;} await new Promise(resolve=>waiting.push(resolve));};
     const release=()=>{const next=waiting.shift();if(next)next();else running--;};
@@ -51,6 +52,9 @@ export async function readArticle(input) {
         reserved+=reservation;
         const res=await safeFetch(req.url(),{maxBytes:reservation,signal:abort.signal,follow:false});
         bytes+=res.body.length;
+        // A bot wall, sign-in redirect or failed main document stops the read now (~1 s), before
+        // Chrome renders a challenge page or waits out the timeouts. Its bytes never reach Chrome.
+        if(req.isNavigationRequest() && req.frame()===req.frame().page()?.mainFrame() && (verdict=documentVerdict(res))) return await route.abort('blockedbyclient');
         // Do not pass Set-Cookie, refresh, reporting, origin trials or other
         // active headers. Location has already crossed the destination guard.
         const type=res.headers['content-type'] || 'application/octet-stream';
@@ -70,9 +74,10 @@ export async function readArticle(input) {
     // Commit the public URL before source JS can initiate client-side navigation.
     let response;
     try { response=await page.goto(input,{waitUntil:'domcontentloaded',timeout:20000}); }
-    catch(e) { if(blocked) throw blocked; throw e; }
+    catch(e) { if(blocked) throw blocked; if(verdict) throw verdict; throw e; }
     if(blocked) throw blocked;
-    if (!response || response.status()>=400) throw new Error('This site could not be read. Try opening it in your browser.');
+    if(verdict) throw verdict;
+    if (!response || response.status()>=400) throw new ReadFailure('This page is not available right now.','unavailable');
     await page.waitForTimeout(1200);
     await destination(page.url());
     const html=await page.content();

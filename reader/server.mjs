@@ -4,6 +4,7 @@ import {fileURLToPath} from 'node:url';
 import {createHash} from 'node:crypto';
 import {safeFetch,UnsafeURL} from './network.mjs';
 import {readArticle} from './render.mjs';
+import {ReadFailure,failure} from './handoff.mjs';
 import {ListStore} from './list-store.mjs';
 import {listAPI,ListError} from './list-api.mjs';
 const store=new ListStore(process.env.READER_DATA_DIR || '/data');
@@ -25,8 +26,16 @@ export const server=http.createServer(async(req,res)=>{
     if(req.method!=='GET' && req.method!=='HEAD') return send(res,405,'{}');
     if(u.pathname==='/health') return send(res,200,JSON.stringify({ok:true,version:'1.1.0',build}));
     if(u.pathname==='/api/reader') {
-      const article=await readArticle(u.searchParams.get('url'));
-      return send(res,200,JSON.stringify(article));
+      const input=u.searchParams.get('url');
+      try { return send(res,200,JSON.stringify(await readArticle(input))); }
+      catch(e) {
+        const out=failure(e,input);
+        // Operator log: reason and host only for expected refusals; the full cause for anything else.
+        let host='';try{host=new URL(input).hostname;}catch{}
+        if(e instanceof ReadFailure || e instanceof UnsafeURL) console.error('reader handoff:',out.body.reason,host);
+        else console.error('reader failure:',out.body.reason,host,(e && e.stack) || e);
+        return send(res,out.status,JSON.stringify(out.body));
+      }
     }
     if(u.pathname==='/api/image') {
       if(images>=8) return send(res,429,'{}'); images++;
