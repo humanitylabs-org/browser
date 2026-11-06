@@ -24,8 +24,11 @@ def ready(cmd):
   if r.returncode==0:return
   time.sleep(1)
  raise RuntimeError('Reader readiness timed out')
+# QA containers carry a label so a timed-out one (the docker client is killed, the container is not) is removed
+# before compose down; otherwise it keeps an endpoint on the project network and down fails (gate 7 Nov 2026).
+QA_LABEL='wizard.qa='+project
 def qa(name,script,timeout=240,extra=()):
- run(name,['docker','run','--rm','--network',project+'_default','-e','UPSTREAM_HOST=browser-engine','-e','SOURCE_ROOT=/sources','-e','EVIDENCE=/evidence',*extra,'-v',str(ROOT)+':/sources:ro','-v',str(ROOT/'browser/tests')+':/opt/qa:ro','-v',str(OUT)+':/evidence',image,'node',script],timeout)
+ run(name,['docker','run','--rm','--label',QA_LABEL,'--network',project+'_default','-e','UPSTREAM_HOST=browser-engine','-e','SOURCE_ROOT=/sources','-e','EVIDENCE=/evidence',*extra,'-v',str(ROOT)+':/sources:ro','-v',str(ROOT/'browser/tests')+':/opt/qa:ro','-v',str(OUT)+':/evidence',image,'node',script],timeout)
 def readback(cmd):
  return json.loads(output(cmd+['exec','-T','browser-reader','node','-e',"fetch('http://127.0.0.1:8080/api/list').then(async r=>{if(!r.ok)process.exit(1);console.log(await r.text())})"]))
 # This service tests the app-owned edge allowlist. Owner authentication itself remains
@@ -42,7 +45,8 @@ try:
  run('inline-check',['python3',str(ROOT/'browser/mcp/inline.py'),'--check'])
  # Real six-source integration kept, plus list MCP, CSRF and exact edge method isolation.
  qa('integration','/opt/qa/integration.mjs',240)
- qa('in-shell','/sources/browser/tests/qa-reader-shell.cjs',420)
+ # Four device/skin runs with real reads; 202 s on the last passing gate. 540 s leaves the whole job inside 900 s.
+ qa('in-shell','/sources/browser/tests/qa-reader-shell.cjs',540)
  seed={'url':'https://contraptions.venkateshrao.com/p/experiments-with-monstrousness'}
  run('persistence-seed',base+['exec','-T','browser-reader','node','-e',"fetch('http://127.0.0.1:8080/api/list',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify("+json.dumps(seed)+")}).then(async r=>{console.log(await r.text());if(!r.ok)process.exit(1)})"],70)
  before=readback(base);assert len(before['items'])==1 and before['items'][0]['title']=='Experiments with Monstrousness',before
@@ -68,12 +72,14 @@ try:
  run('recreate-compiled-wam-storage',compiled+['up','-d','--force-recreate','--no-deps','browser-reader'],45);ready(compiled)
  after=readback(compiled);assert after==before
  (OUT/'persistence-after-restore-recreate.json').write_text(json.dumps({'items':after['items'],'archive_sha256':hashlib.sha256(archive.read_bytes()).hexdigest(),'archive_path':'app-data/volumes/reading-list/list.json'},indent=2))
- qa('in-shell-after-restart','/sources/browser/tests/qa-reader-shell.cjs',150,['-e','PERSISTENCE_ONLY=1'])
+ qa('in-shell-after-restart','/sources/browser/tests/qa-reader-shell.cjs',90,['-e','PERSISTENCE_ONLY=1'])
  # Verify deny policy still applies to the actual running Reader, not a test mock.
  run('deny-self-hosts',compiled+['exec','-T','browser-reader','node','--input-type=module','-e',"import {destination,UnsafeURL} from './network.mjs';for(const host of process.env.READER_DENY_HOSTS.split(',')){try{await destination('https://'+(host.includes(':')?'['+host+']':host)+'/');throw Error('allowed '+host);}catch(e){if(!(e instanceof UnsafeURL))throw e;console.log('denied '+host);}}"])
 except Exception as e:
  (OUT/'failure.txt').write_text(str(e));raise
 finally:
  run('compose-logs',base+['logs','--no-color'],30,False)
+ leftover=subprocess.run(['docker','ps','-aq','--filter','label='+QA_LABEL],capture_output=True,text=True).stdout.split()
+ if leftover:run('qa-cleanup',['docker','rm','-f',*leftover],30,False)
  run('compose-down',base+['down','-v'],45,False)
  (OUT/'source.json').write_text(json.dumps(source,indent=2))

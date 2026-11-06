@@ -90,8 +90,12 @@ async function boot(phone,skin){
  return {ctx,p,d,hold:()=>{hold=true;},unhold:()=>{hold=false;release?.();release=null;},holdList:()=>{listHold=true;},unholdList:()=>{listHold=false;listRelease?.();listRelease=null;}};
 }
 async function chat(p,phone){await p.evaluate(({SID,phone})=>{const a=window.__wux||window.__wos;if(!phone)a.openThread(SID);else {const w=Object.values(a.wins).find(w=>w.app==='chats');a.goDesk(a.desks.findIndex(d=>d.wins.includes(w.id)));a.chats.openChat(w.id,SID);}}, {SID,phone});await p.locator(`.bub a[href="${target.url}"]`).first().waitFor({state:'visible'});}
-const frame=p=>p.frames().find(f=>new URL(f.url()||ORIGIN).pathname.startsWith('/browser/'));
-async function reader(p){await p.waitForFunction(()=>[...document.querySelectorAll('iframe')].some(f=>f.src.includes('/browser/?url=')));const until=Date.now()+10000;while(Date.now()<until){const f=frame(p);if(f){await f.locator('#status').waitFor({state:'attached'});return f;}await new Promise(r=>setTimeout(r,50));}throw Error('Reader frame did not load');}
+// The newest Reader frame (a stale one left behind must never answer for a fresh tap).
+const frame=p=>p.frames().filter(f=>{try{return new URL(f.url()||ORIGIN).pathname.startsWith('/browser/');}catch{return false;}}).at(-1);
+const readerFor=(p,url)=>p.frames().find(f=>{try{const u=new URL(f.url()||ORIGIN);return u.pathname.startsWith('/browser/')&&u.searchParams.get('url')===url;}catch{return false;}});
+// Reader frames still on screen for a link (after a hand-off James must be back in the chat, not on Reader).
+const readerShown=(p,url)=>p.evaluate(url=>[...document.querySelectorAll('iframe')].some(f=>{let u;try{u=new URL(f.src,location.href);}catch{return false;}if(!u.pathname.startsWith('/browser/')||u.searchParams.get('url')!==url)return false;const r=f.getBoundingClientRect();return r.width>0&&r.height>0&&getComputedStyle(f).visibility!=='hidden';}),url);
+async function reader(p,url){await p.waitForFunction(()=>[...document.querySelectorAll('iframe')].some(f=>f.src.includes('/browser/?url=')));const until=Date.now()+10000;while(Date.now()<until){const f=url?readerFor(p,url):frame(p);if(f){await f.locator('#status').waitFor({state:'attached'});return f;}await new Promise(r=>setTimeout(r,50));}throw Error('Reader frame did not load');}
 async function readDone(f){await f.waitForFunction(()=>document.querySelector('#status').hidden,null,{timeout:45000});assert.ok((await f.locator('#article').innerText()).length>150);}
 async function back(p,phone){if(phone)await p.evaluate(()=>__wos.onBack());else await p.keyboard.press('Escape');await p.waitForTimeout(400);}
 (async()=>{fs.mkdirSync(OUT,{recursive:true});try{
@@ -150,39 +154,47 @@ async function back(p,phone){if(phone)await p.evaluate(()=>__wos.onBack());else 
    await test(tag+'-internal-link-unchanged',async()=>{await p.locator('.bub a[href="/notes/"]').first().click();await p.waitForFunction(()=>[...document.querySelectorAll('iframe')].some(f=>new URL(f.src).pathname==='/notes/'));assert.ok(!p.frames().some(f=>new URL(f.url()||ORIGIN).pathname==='/browser/'&&new URL(f.url()).searchParams.get('url')?.includes('/notes/')));await p.screenshot({path:path.join(OUT,tag+'-internal-notes.png')});await back(p,phone);},p);
    await test(tag+'-chat-tap-blocked-host-one-tap',async()=>{
     await p.evaluate(()=>{localStorage.removeItem('wos.readerDirect.v1');__qaNative.length=0;});await chat(p,phone);
+    // Earlier PDF/APK download tests legitimately leave their own tabs: count only what THIS tap opens.
+    const pagesBefore=ctx.pages().length;
     const link=p.locator(`.bub a[href="${BLOCKED}"]`).first();await link.waitFor({state:'visible'});
     const before=d.readerTraffic.length,popup=phone?null:ctx.waitForEvent('page',{timeout:20000}),t0=Date.now();
     await link.click();
     if(phone)await p.waitForFunction(u=>__qaNative.some(c=>c[0]==='browser'&&c[1]===u),BLOCKED,{timeout:20000});
-    else{const pg=await popup;await p.waitForTimeout(300);await pg.close();}
+    else{const pg=await popup;assert.equal(ctx.pages().length,pagesBefore+1,'desktop: exactly one new tab for the original');await p.waitForTimeout(300);await pg.close();}
     const handoffMs=Date.now()-t0;
     const api=d.readerTraffic.slice(before).filter(r=>r.path.startsWith('/browser/api/reader'));
     assert.equal(api.length,1,JSON.stringify(api));assert.equal(api[0].status,422);const body=JSON.parse(api[0].error);
     assert.ok(body.handoff===true&&['blocked','signin'].includes(body.reason),JSON.stringify(body));assert.ok(api[0].ms<3000,'bot wall must fail in ~1 s: '+api[0].ms);
     if(!phone)assert.ok(d.foreign.some(u=>u===BLOCKED),'desktop opened the original tab on the first tap: '+JSON.stringify(d.foreign));
-    // Opened from a chat link: the owner is back where they tapped, as before Reader.
-    await p.locator(`.bub a[href="${BLOCKED}"]`).first().waitFor({state:'visible',timeout:10000});await p.waitForTimeout(400);
+    // Opened from a chat link: the owner is back where they tapped, as before Reader (phone: the Reader desk closed;
+    // desktop: the Reader preview window closed), with no Reader fallback page left on screen.
+    await p.locator(`.bub a[href="${BLOCKED}"]`).first().waitFor({state:'visible',timeout:10000});
+    await p.waitForFunction(u=>![...document.querySelectorAll('iframe')].some(f=>{let x;try{x=new URL(f.src,location.href);}catch{return false;}const r=f.getBoundingClientRect();return x.pathname.startsWith('/browser/')&&x.searchParams.get('url')===u&&r.width>0&&r.height>0;}),BLOCKED,{timeout:5000});
+    assert.equal(await readerShown(p,BLOCKED),false,'Reader must not stay open after the hand-off');await p.waitForTimeout(400);
     await p.screenshot({path:path.join(OUT,tag+'-blocked-handoff.png')});
     const stored=await p.evaluate(()=>JSON.parse(localStorage.getItem('wos.readerDirect.v1')||'{}'));assert.deepEqual(Object.keys(stored),[new URL(BLOCKED).hostname]);
     // Next link to that host: straight to the browser, Reader is not asked again.
     const before2=d.readerTraffic.length,popup2=phone?null:ctx.waitForEvent('page',{timeout:10000}),t1=Date.now();
     await p.locator(`.bub a[href="${BLOCKED2}"]`).first().click();
-    if(phone)await p.waitForFunction(u=>__qaNative.some(c=>c[0]==='browser'&&c[1]===u),BLOCKED2,{timeout:10000});else{const pg=await popup2;await pg.close();}
+    if(phone)await p.waitForFunction(u=>__qaNative.some(c=>c[0]==='browser'&&c[1]===u),BLOCKED2,{timeout:10000});else{const pg=await popup2;assert.equal(ctx.pages().length,pagesBefore+1);await pg.close();}
     const directMs=Date.now()-t1;assert.equal(d.readerTraffic.slice(before2).filter(r=>r.path.startsWith('/browser/api/reader')).length,0);
-    assert.equal(ctx.pages().length,1);return{blocked:BLOCKED,reason:body.reason,readerMs:api[0].ms,handoffMs,directMs,native:await p.evaluate(()=>__qaNative.slice())};
+    assert.equal(await readerShown(p,BLOCKED2),false);
+    assert.equal(ctx.pages().length,pagesBefore,'every tab this test opened is closed; none other appeared');return{blocked:BLOCKED,reason:body.reason,readerMs:api[0].ms,handoffMs,directMs,native:await p.evaluate(()=>__qaNative.slice())};
    },p);
    await test(tag+'-chat-tap-wizard-own-page-skips-reader',async()=>{
-    await p.evaluate(()=>{__qaNative.length=0;});const before=d.readerTraffic.length,foreign=d.foreign.length;
+    // Each step starts from the chat (a failed step before must not cover this link).
+    await chat(p,phone);await p.evaluate(()=>{__qaNative.length=0;});const before=d.readerTraffic.length,foreign=d.foreign.length,pagesBefore=ctx.pages().length;
     const popup=phone?null:ctx.waitForEvent('page',{timeout:10000});
     await p.locator(`.bub a[href="${OWN}"]`).first().click();
-    if(phone)await p.waitForFunction(u=>__qaNative.some(c=>c[0]==='browser'&&c[1]===u),OWN,{timeout:10000});else{const pg=await popup;await p.waitForTimeout(300);await pg.close();}
+    // Pre-Reader behaviour for another origin: phone hands it to the native browser, desktop opens one new tab.
+    if(phone)await p.waitForFunction(u=>__qaNative.some(c=>c[0]==='browser'&&c[1]===u),OWN,{timeout:10000});else{const pg=await popup;assert.equal(ctx.pages().length,pagesBefore+1);await p.waitForTimeout(300);await pg.close();}
     assert.equal(d.readerTraffic.slice(before).filter(r=>r.path.startsWith('/browser/api/reader')).length,0,'Wizard own page must never reach Reader');
     assert.ok(!p.frames().some(f=>{try{return (new URL(f.url()).searchParams.get('url')||'').includes('wizard.aiwizards.com');}catch{return false;}}));
     if(!phone)assert.ok(d.foreign.slice(foreign).some(u=>u.startsWith('https://wizard.aiwizards.com/clips-pipeline/')),JSON.stringify(d.foreign.slice(foreign)));
-    await p.screenshot({path:path.join(OUT,tag+'-own-page-direct.png')});assert.equal(ctx.pages().length,1);
+    await p.screenshot({path:path.join(OUT,tag+'-own-page-direct.png')});assert.equal(ctx.pages().length,pagesBefore);
     return{own:OWN,native:await p.evaluate(()=>__qaNative.slice())};
    },p);
-   await test(tag+'-genuine-search-result-tap',async()=>{await p.evaluate(phone=>{const a=window.__wux||window.__wos;a.openApp(WizCore.apps(phone?'mobile':'desktop').APP['wizard-search']);},phone);await p.waitForFunction(()=>[...document.querySelectorAll('iframe')].some(f=>f.src.includes('/search/')));const until=Date.now()+10000;let f;while(!f&&Date.now()<until){f=p.frames().find(f=>f.url().includes('/search/'));await p.waitForTimeout(50);}assert.ok(f);await f.locator('#q').fill('Wikipedia Reading');await f.locator('#q').press('Enter');await f.locator(`#web a[href="${target.url}"]`).waitFor({state:'visible'});await p.screenshot({path:path.join(OUT,tag+'-search-results.png')});const pagesBefore=ctx.pages().length;await f.locator(`#web a[href="${target.url}"]`).click();const rf=await reader(p);await readDone(rf);await p.screenshot({path:path.join(OUT,tag+'-search-reader.png')});assert.equal(ctx.pages().length,pagesBefore,'Search result tap must not open a new tab');return{url:target.url,title:await rf.locator('#title').innerText(),provider:search.source};},p);
+   await test(tag+'-genuine-search-result-tap',async()=>{await p.evaluate(phone=>{const a=window.__wux||window.__wos;a.openApp(WizCore.apps(phone?'mobile':'desktop').APP['wizard-search']);},phone);await p.waitForFunction(()=>[...document.querySelectorAll('iframe')].some(f=>f.src.includes('/search/')));const until=Date.now()+10000;let f;while(!f&&Date.now()<until){f=p.frames().find(f=>f.url().includes('/search/'));await p.waitForTimeout(50);}assert.ok(f);await f.locator('#q').fill('Wikipedia Reading');await f.locator('#q').press('Enter');await f.locator(`#web a[href="${target.url}"]`).waitFor({state:'visible'});await p.screenshot({path:path.join(OUT,tag+'-search-results.png')});const pagesBefore=ctx.pages().length;await f.locator(`#web a[href="${target.url}"]`).click();const t0=Date.now();const rf=await reader(p,target.url);await readDone(rf);const readMs=Date.now()-t0;await p.screenshot({path:path.join(OUT,tag+'-search-reader.png')});assert.equal(ctx.pages().length,pagesBefore,'Search result tap must not open a new tab');return{url:target.url,title:await rf.locator('#title').innerText(),provider:search.source,readMs};},p);
    await test(tag+'-defuddle-real-articles',async()=>{
     const f=frame(p);assert.ok(f);const pages=[];
     await p.evaluate(skin=>WosSkin.set(skin),skin);
