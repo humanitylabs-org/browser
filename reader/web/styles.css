@@ -20,7 +20,11 @@ h1 {font:700 2em/1.2 var(--wz-font-display);margin:28px 0 16px;overflow-wrap:any
 #article figure {margin:24px 0;}
 #article figcaption {font-size:.85em;color:var(--wz-text-secondary);}
 #article a {color:var(--wz-accent);text-underline-offset:3px;}
-#article pre {overflow:auto;padding:16px;background:var(--wz-surface);border:1px solid var(--wz-border);border-radius:var(--wz-radius,8px);}
+#article pre {max-width:100%;box-sizing:border-box;overflow-x:auto;white-space:pre;overflow-wrap:normal;padding:16px;background:var(--wz-surface);border:1px solid var(--wz-border);border-radius:var(--wz-radius,8px);}
+#article code,#article kbd {font-family:var(--wz-font-mono,monospace);font-size:.9em;}
+#article :not(pre)>code {overflow-wrap:anywhere;}
+#article pre code {white-space:inherit;overflow-wrap:normal;}
+#article sup,#article sub {font-size:.75em;line-height:0;}
 #article blockquote {margin-inline:0;padding-inline-start:20px;border-inline-start:3px solid var(--wz-accent);color:var(--wz-text-secondary);}
 #article table {display:block;overflow:auto;border-collapse:collapse;}
 #article th,#article td {padding:8px;border:1px solid var(--wz-border);}

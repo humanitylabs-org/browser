@@ -139,6 +139,25 @@ async function back(p,phone){if(phone)await p.evaluate(()=>__wos.onBack());else 
    await test(tag+'-pdf-apk-download',async()=>{const downloaded=[];for(const ext of ['pdf','apk']){if(phone)await p.locator(`.bub a[href$=".${ext}"]`).first().click();else{const pending=p.waitForEvent('download');await p.locator(`.bub a[href$=".${ext}"]`).first().click();const file=await pending;assert.equal(file.suggestedFilename(),'reader.'+ext);assert.equal(await file.failure(),null);downloaded.push(file.suggestedFilename());}}const calls=await p.evaluate(()=>__qaNative);if(phone){assert.ok(calls.some(c=>c[0]==='download'&&c[1].endsWith('.pdf')),JSON.stringify(calls));assert.ok(calls.some(c=>c[0]==='download'&&c[1].endsWith('.apk')),JSON.stringify(calls));}else assert.deepEqual(downloaded,['reader.pdf','reader.apk']);return{nativeDownloads:calls,browserDownloads:downloaded};},p);
    await test(tag+'-internal-link-unchanged',async()=>{await p.locator('.bub a[href="/notes/"]').first().click();await p.waitForFunction(()=>[...document.querySelectorAll('iframe')].some(f=>new URL(f.src).pathname==='/notes/'));assert.ok(!p.frames().some(f=>new URL(f.url()||ORIGIN).pathname==='/browser/'&&new URL(f.url()).searchParams.get('url')?.includes('/notes/')));await p.screenshot({path:path.join(OUT,tag+'-internal-notes.png')});await back(p,phone);},p);
    await test(tag+'-genuine-search-result-tap',async()=>{await p.evaluate(phone=>{const a=window.__wux||window.__wos;a.openApp(WizCore.apps(phone?'mobile':'desktop').APP['wizard-search']);},phone);await p.waitForFunction(()=>[...document.querySelectorAll('iframe')].some(f=>f.src.includes('/search/')));const until=Date.now()+10000;let f;while(!f&&Date.now()<until){f=p.frames().find(f=>f.url().includes('/search/'));await p.waitForTimeout(50);}assert.ok(f);await f.locator('#q').fill('Wikipedia Reading');await f.locator('#q').press('Enter');await f.locator(`#web a[href="${target.url}"]`).waitFor({state:'visible'});await p.screenshot({path:path.join(OUT,tag+'-search-results.png')});const pagesBefore=ctx.pages().length;await f.locator(`#web a[href="${target.url}"]`).click();const rf=await reader(p);await readDone(rf);await p.screenshot({path:path.join(OUT,tag+'-search-reader.png')});assert.equal(ctx.pages().length,pagesBefore,'Search result tap must not open a new tab');return{url:target.url,title:await rf.locator('#title').innerText(),provider:search.source};},p);
+   await test(tag+'-defuddle-real-articles',async()=>{
+    const f=frame(p);assert.ok(f);const pages=[];
+    await p.evaluate(skin=>WosSkin.set(skin),skin);
+    await p.waitForFunction(skin=>document.documentElement.dataset.skin===skin,skin);
+    await f.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+    for(const [name,url,bodyPattern] of [
+     ['github-pr','https://github.com/humanitylabs-org/wizard-ux/pull/1023',/What and why/],
+     ['rao','https://contraptions.venkateshrao.com/p/experiments-with-monstrousness',/cognitive mercantilism/i]
+    ]) {
+     await f.locator('#url').fill(url);await f.locator('#address button').click();await readDone(f);
+     const text=await f.locator('#article').innerText();assert.match(text,bodyPattern);
+     if(name==='github-pr')assert.doesNotMatch(text,/Codex Review|Navigation Menu|Skip to content/);
+     const width=await f.evaluate(()=>({viewport:document.documentElement.clientWidth,scroll:document.documentElement.scrollWidth,pre:[...document.querySelectorAll('#article pre')].map(el=>getComputedStyle(el).overflowX),tables:[...document.querySelectorAll('#article table')].map(el=>getComputedStyle(el).overflowX)}));
+     assert.ok(width.scroll<=width.viewport+2,JSON.stringify(width));
+     await p.screenshot({path:path.join(OUT,tag+'-defuddle-'+name+'.png')});
+     pages.push({url,title:await f.locator('#title').innerText(),byline:await f.locator('#byline').innerText(),width});
+    }
+    return{pages};
+   },p);
    await test(tag+'-no-page-errors',async()=>{assert.deepEqual(d.pageErrors,[]);assert.ok(!d.routeError,d.routeError);return{blockedOwnerWrites:d.writes,foreignRequestsBlocked:d.foreign};},p);
   }finally{h.unhold();h.unholdList();await ctx.close();save();}
  }

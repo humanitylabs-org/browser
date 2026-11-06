@@ -24,7 +24,7 @@ jobs:
       - run: python3 -m unittest discover -s tests -p 'test_*.py'
       - run: python3 mcp/inline.py --check
   build:
-    if: github.event_name == 'workflow_dispatch' && github.repository == 'humanitylabs-org/browser' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feat/reader' || github.ref == 'refs/heads/feat/reading-list') && inputs.expected_sha == github.sha
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'humanitylabs-org/browser' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feat/reader' || github.ref == 'refs/heads/feat/reading-list' || github.ref == 'refs/heads/fix/defuddle-reader') && inputs.expected_sha == github.sha
     needs: checks
     permissions:
       contents: read
