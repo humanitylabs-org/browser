@@ -5,7 +5,7 @@ name: Browser
 type: view
 category: system
 tags: [research, automation]
-version: 155.0.8059.42
+version: 155.0.8059.43
 summary: Read web pages inside Wizard, with a private Chrome for agent web tasks.
 view:
   path: /
