@@ -112,9 +112,11 @@
     if(!window.WizardApp?.hosted)return false;
     const a=document.createElement('a');a.href=url;a.target='_blank';a.rel='noopener noreferrer';a.hidden=true;
     a.dataset.wizardBrowse='auto';a.dataset.wizardReason=/^[a-z]{1,16}$/.test(reason || '')?reason:'unavailable';
-    let taken=false;a.addEventListener('click',e=>{taken=e.defaultPrevented;e.preventDefault();});
-    document.body.append(a);a.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,button:0}));a.remove();
-    if(!taken)return false;
+    // Wizard's link guard takes it with preventDefault() and may also stop propagation, so this target listener can
+    // be skipped: read the dispatch result, and only cancel the hidden link's own navigation when nobody took it.
+    let declined=false;a.addEventListener('click',e=>{if(!e.defaultPrevented){declined=true;e.preventDefault();}});
+    document.body.append(a);const notCancelled=a.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,button:0}));a.remove();
+    if(notCancelled || declined)return false;
     status.hidden=false;status.textContent=(message || 'Reader could not read this page.')+' Opened the original in your browser.';
     // Opened from a link: return to where the owner tapped it, as links did before Reader.
     if(opened)window.WizardApp?.nav?.back?.();

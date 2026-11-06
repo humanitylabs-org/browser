@@ -49,11 +49,11 @@ test('failed optimistic save rolls back with visible retry; saved state never li
 });
 
 // James, 7 Nov 2026: a page Reader cannot read opens the original at once, without a second tap.
-async function failing(t,{take,hosted=true,body={error:'This site does not let Reader in.',reason:'blocked',handoff:true}}={}) {
+async function failing(t,{take,stop=false,hosted=true,body={error:'This site does not let Reader in.',reason:'blocked',handoff:true}}={}) {
  const url='https://www.reuters.com/world/story';
  const dom=new JSDOM(html,{url:'https://wizard.test/browser/?url='+encodeURIComponent(url),runScripts:'outside-only'});t.after(()=>dom.window.close());const w=dom.window;const seen=[];let backs=0;
  w.WizardApp={hosted,ready(){},back:{register(){}},update:{hold(){return {release(){}};}},nav:{back(){backs++;return true;}}};w.scrollTo=()=>{};
- w.document.addEventListener('click',e=>{const a=e.target.closest('a[data-wizard-browse]');if(!a)return;seen.push([a.getAttribute('href'),a.dataset.wizardBrowse,a.dataset.wizardReason,a.target]);if(take)e.preventDefault();},true);
+ w.document.addEventListener('click',e=>{const a=e.target.closest('a[data-wizard-browse]');if(!a)return;seen.push([a.getAttribute('href'),a.dataset.wizardBrowse,a.dataset.wizardReason,a.target]);if(take)e.preventDefault();if(take&&stop)e.stopPropagation();},true);
  w.fetch=async u=>u.startsWith('api/reader')?{ok:false,json:async()=>body}:{ok:true,json:async()=>({items:[]})};
  w.eval(code);await turn();await turn();return {w,$:s=>w.document.querySelector(s),seen,backs:()=>backs,url};
 }
@@ -76,4 +76,11 @@ test('busy or non-hand-off failures never open anything',async t=>{
 });
 test('standalone Reader (no Wizard host) keeps the old visible fallback',async t=>{
  const a=await failing(t,{take:true,hosted:false});assert.equal(a.seen.length,0);assert.equal(a.backs(),0);
+});
+test('hand-off is taken even when the shell link guard also stops propagation (real WizLinks.guardFrame)',async t=>{
+ // The installed shell's capture listener calls preventDefault() AND stopPropagation(); the gate saw Reader keep its
+ // fallback page open over the chat on the phone because Reader's own target listener never ran.
+ const a=await failing(t,{take:true,stop:true});
+ assert.equal(a.seen.length,1);assert.equal(a.backs(),1,'returns to the tapped chat');
+ assert.match(a.$('#status').textContent,/Opened the original in your browser/);
 });
