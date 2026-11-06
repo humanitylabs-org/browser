@@ -1,6 +1,8 @@
 import {JSDOM} from 'jsdom';
 import createDOMPurify from 'dompurify';
 import {Readability} from '@mozilla/readability';
+import {DefuddleClass} from 'defuddle/node';
+import {DOMSelector} from '@asamuzakjp/dom-selector';
 import {webURL} from './network.mjs';
 
 const tags = ['picture','source','p','div','section','article','h1','h2','h3','h4','h5','h6','a','img','figure','figcaption','blockquote','ul','ol','li','strong','b','em','i','s','del','code','pre','kbd','br','hr','table','thead','tbody','tr','th','td','sup','sub','dl','dt','dd'];
@@ -34,17 +36,48 @@ export function extract(renderedHTML, finalURL) {
   const dom=new JSDOM(renderedHTML,{url:finalURL});
   try {
     const doc=dom.window.document;
+    if(doc.getElementsByTagName('*').length>50000) throw new Error('This page is too large for Reader.');
     // The proxy serves bitmaps only, so prefer bitmap icons over SVG ones.
     const icons=[...doc.querySelectorAll('link[rel~="apple-touch-icon"],link[rel~="icon"]')].filter(l=>!/svg/i.test(l.getAttribute('type')||'') && !/\.svg(\?|$)/i.test(l.getAttribute('href')||''));
-    const icon=icons[0]?.getAttribute('href') || '/favicon.ico';
+    const icon=icons[0]?.getAttribute('href') || '';
     const named=doc.querySelector('meta[property="og:site_name"]')?.content || doc.querySelector('meta[name="application-name"]')?.content || suffix(doc.title);
     const site=named || new URL(finalURL).hostname;
     const canonical=doc.querySelector('link[rel="canonical"]')?.href;
     const date=doc.querySelector('meta[property="article:published_time"],meta[name="date"],meta[name="pubdate"]')?.content || doc.querySelector('time[datetime]')?.getAttribute('datetime') || '';
-    const article=new Readability(doc,{maxElemsToParse:50000,charThreshold:150}).parse();
-    if (!article || !article.textContent || article.textContent.trim().length < 150) throw new Error('Reader could not find an article on this page. It may need a sign-in or a check in your browser.');
-    let favicon=''; try { favicon='api/image?url='+encodeURIComponent(webURL(icon,finalURL).href); } catch {}
+    // Use the Node entry point, but ONLY its synchronous DOM parser. Async site
+    // extractors can fetch third-party APIs outside our guarded render transport.
+    // Replies are not the article (notably GitHub bot reviews and comment tables).
+    const extractionDOM=new JSDOM(renderedHTML,{url:finalURL});
+    const extractionDoc=extractionDOM.window.document;
+    // Defuddle's built-in boilerplate selector list exceeds jsdom 30's 2 KiB
+    // per-selector default. Configure the SAME selector engine for this inert
+    // extraction window only (including Defuddle's clones). DOMPurify is unchanged.
+    const selectors=new DOMSelector(extractionDOM.window,extractionDoc,{maxLength:65536});
+    const prototype=extractionDOM.window.Document.prototype,queryAll=prototype.querySelectorAll;
+    prototype.querySelectorAll=function(selector) {return selector.length>2048 ? selectors.querySelectorAll(selector,this) : queryAll.call(this,selector);};
+    let result;
+    try { result=new DefuddleClass(extractionDoc,{url:finalURL,useAsync:false,includeReplies:new URL(finalURL).hostname==='github.com' ? false : 'extractors',markdown:false,fetch:()=>{throw new Error('Extraction cannot fetch');}}).parse(); } catch {}
+    finally {extractionDOM.window.close();}
+    const usable = html => {
+      const fragment=JSDOM.fragment(html || '');
+      return (fragment.textContent || '').trim().length>=150;
+    };
+    let html=result?.content ? cleanArticle(result.content,finalURL) : '';
+    let extractor='defuddle';
+    if (!usable(html)) {
+      // Defuddle mutates its document; Readability must receive the original DOM.
+      const fallback=new Readability(doc,{maxElemsToParse:50000,charThreshold:150}).parse();
+      result=fallback && {title:fallback.title,site:fallback.siteName,author:fallback.byline,published:fallback.publishedTime,description:fallback.excerpt};
+      html=fallback?.content ? cleanArticle(fallback.content,finalURL) : '';
+      extractor='readability';
+    }
+    if (!result || !usable(html)) throw new Error('Reader could not find an article on this page. It may need a sign-in or a check in your browser.');
+    const proxy = value => {try {return 'api/image?url='+encodeURIComponent(webURL(value,finalURL).href);} catch {return '';}};
+    // Keep the bitmap icon preference: Defuddle may select an SVG favicon which
+    // the deliberately bitmap-only proxy cannot serve.
+    const bitmapIcon=result.favicon && !/\.svg(?:[?#]|$)/i.test(result.favicon) ? result.favicon : '';
+    const favicon=proxy(icon || bitmapIcon || '/favicon.ico');
     let canonicalURL=finalURL; try { if(canonical) canonicalURL=webURL(canonical,finalURL).href; } catch {}
-    return {title:article.title || site,siteName:named || article.siteName || site,url:finalURL,canonicalURL,byline:article.byline || '',publishedTime:article.publishedTime || date,favicon,html:cleanArticle(article.content,finalURL)};
+    return {title:result.title || site,siteName:named || result.site || site,url:finalURL,canonicalURL,byline:result.author || '',publishedTime:result.published || date,favicon,image:result.image ? proxy(result.image) : '',description:result.description || '',extractor,html};
   } finally { dom.window.close(); }
 }
