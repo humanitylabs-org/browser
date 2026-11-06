@@ -97,7 +97,7 @@ async function back(p,phone){if(phone)await p.evaluate(()=>__wos.onBack());else 
 (async()=>{fs.mkdirSync(OUT,{recursive:true});try{
  // Chrome's DevTools rejects non-IP Host headers (HTTP 500); connect by IP like Reader's own chrome().
  // Pick a host the real Reader refuses as a bot wall from this network (GET only, no list write).
- const tried=[];for(const url of BLOCK_CANDIDATES){const t0=Date.now();const r=await fetch('http://browser:9222/api/reader?url='+encodeURIComponent(url));const body=await r.json().catch(()=>({}));tried.push({url,status:r.status,reason:body.reason,handoff:body.handoff,ms:Date.now()-t0});if(body.handoff===true&&['blocked','signin'].includes(body.reason)){BLOCKED=url;break;}}
+ const tried=[];for(const url of BLOCK_CANDIDATES){const t0=Date.now();const r=await proxyRequest('http://reader-edge:8080/browser/api/reader?url='+encodeURIComponent(url),{headers:{'x-forwarded-for':'100.64.10.20','x-forwarded-proto':'http',host:new URL(ORIGIN).host,'accept-encoding':'identity'}});let body={};try{body=JSON.parse(r.body.toString());}catch{}tried.push({url,status:r.status,reason:body.reason,handoff:body.handoff,ms:Date.now()-t0});if(body.handoff===true&&['blocked','signin'].includes(body.reason)){BLOCKED=url;break;}}
  blockedChoice={chosen:BLOCKED,tried};assert.ok(tried.some(t=>t.url===BLOCKED&&['blocked','signin'].includes(t.reason)),'No candidate is refused by the real Reader here: '+JSON.stringify(tried));
  assert.ok(tried.find(t=>t.url===BLOCKED).ms<3000,'bot wall must fail fast: '+JSON.stringify(tried));
  BLOCKED2=BLOCKED+'?second=1';MSG=message();row=makeRow();

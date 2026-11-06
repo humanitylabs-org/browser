@@ -39,6 +39,16 @@ test('failure responses carry a plain message, reason and hand-off flag; private
 });
 test('the render path stops a main-document verdict before Chrome renders it',async()=>{
   const src=await (await import('node:fs/promises')).readFile(new URL('../render.mjs',import.meta.url),'utf8');
-  assert.match(src,/isNavigationRequest\(\) && req\.frame\(\)===req\.frame\(\)\.page\(\)\?\.mainFrame\(\) && \(verdict=documentVerdict\(res\)\)\) return await route\.abort/);
+  assert.match(src,/const nav=req\.isNavigationRequest\(\) && req\.frame\(\)===req\.frame\(\)\.page\(\)\?\.mainFrame\(\);/);
+  assert.match(src,/if\(nav && \(verdict=documentVerdict\(res\)\)\) return await route\.abort/);
   assert.match(src,/if\(verdict\) throw verdict;/);
+});
+test('Chrome is never handed a redirect: subresources follow in safeFetch, the main document re-navigates to the checked hop',async()=>{
+  // Live 7 Nov 2026: http://github.com/…, https://wikipedia.org/… and Cloudflare Access pages all failed with
+  // net::ERR_TUNNEL_CONNECTION_FAILED because Playwright does not route a fulfilled redirect's next request.
+  const src=await (await import('node:fs/promises')).readFile(new URL('../render.mjs',import.meta.url),'utf8');
+  assert.match(src,/safeFetch\(req\.url\(\),\{maxBytes:reservation,signal:abort\.signal,follow:!nav\}\)/);
+  assert.match(src,/hop=res\.headers\.location; return await route\.abort/);
+  assert.match(src,/for\(let hops=0;;hops\+\+\)/);
+  assert.doesNotMatch(src,/headers\.location=res\.headers\.location/,'no Location ever reaches Chrome');
 });

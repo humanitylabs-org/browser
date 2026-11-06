@@ -37,7 +37,7 @@ export async function readArticle(input) {
     });
     const expire=()=>{void context.close().catch(()=>{});}; abort.signal.addEventListener('abort',expire,{once:true});
     await context.routeWebSocket('**/*',route=>route.close());
-    let requests=0, bytes=0, reserved=0, running=0, blocked=null, verdict=null;
+    let requests=0, bytes=0, reserved=0, running=0, blocked=null, verdict=null, hop=null;
     const waiting=[];
     const acquire=async()=>{if(running<4) {running++;return;} await new Promise(resolve=>waiting.push(resolve));};
     const release=()=>{const next=waiting.shift();if(next)next();else running--;};
@@ -50,16 +50,19 @@ export async function readArticle(input) {
         reservation=Math.min(8*1024*1024,32*1024*1024-bytes-reserved);
         if(reservation<=0) return await route.abort();
         reserved+=reservation;
-        const res=await safeFetch(req.url(),{maxBytes:reservation,signal:abort.signal,follow:false});
+        const nav=req.isNavigationRequest() && req.frame()===req.frame().page()?.mainFrame();
+        // Chrome is never handed a redirect: Playwright does not route a redirect's next request, so it
+        // went to the deny proxy and every redirecting link failed (net::ERR_TUNNEL_CONNECTION_FAILED).
+        // Subresources follow in safeFetch, which checks every hop; the main document navigates again below.
+        const res=await safeFetch(req.url(),{maxBytes:reservation,signal:abort.signal,follow:!nav});
         bytes+=res.body.length;
         // A bot wall, sign-in redirect or failed main document stops the read now (~1 s), before
         // Chrome renders a challenge page or waits out the timeouts. Its bytes never reach Chrome.
-        if(req.isNavigationRequest() && req.frame()===req.frame().page()?.mainFrame() && (verdict=documentVerdict(res))) return await route.abort('blockedbyclient');
-        // Do not pass Set-Cookie, refresh, reporting, origin trials or other
-        // active headers. Location has already crossed the destination guard.
+        if(nav && (verdict=documentVerdict(res))) return await route.abort('blockedbyclient');
+        if(nav && res.headers.location && res.status>=300 && res.status<400) { hop=res.headers.location; return await route.abort('aborted'); }
+        // Do not pass Set-Cookie, refresh, reporting, origin trials, Location or other active headers.
         const type=res.headers['content-type'] || 'application/octet-stream';
         const headers={'content-type':type,'x-content-type-options':'nosniff'};
-        if(res.headers.location) headers.location=res.headers.location;
         for(const h of ['access-control-allow-origin','access-control-allow-credentials']) if(res.headers[h]) headers[h]=res.headers[h];
         await route.fulfill({status:res.status,headers,body:res.body});
       } catch(e) {
@@ -72,11 +75,18 @@ export async function readArticle(input) {
     const page=await context.newPage(); page.setDefaultTimeout(20000);
     page.on('popup',p=>void p.close());
     // Commit the public URL before source JS can initiate client-side navigation.
-    let response;
-    try { response=await page.goto(input,{waitUntil:'domcontentloaded',timeout:20000}); }
-    catch(e) { if(blocked) throw blocked; if(verdict) throw verdict; throw e; }
-    if(blocked) throw blocked;
-    if(verdict) throw verdict;
+    let response, target=input;
+    for(let hops=0;;hops++) {
+      hop=null;
+      try { response=await page.goto(target,{waitUntil:'domcontentloaded',timeout:20000}); }
+      catch(e) { if(blocked) throw blocked; if(verdict) throw verdict; if(!hop) throw e; }
+      if(blocked) throw blocked;
+      if(verdict) throw verdict;
+      if(!hop) break;
+      // hop already passed the destination guard inside safeFetch.
+      if(hops>=5) throw new ReadFailure('This page redirects too many times.','unavailable');
+      target=hop;
+    }
     if (!response || response.status()>=400) throw new ReadFailure('This page is not available right now.','unavailable');
     await page.waitForTimeout(1200);
     await destination(page.url());

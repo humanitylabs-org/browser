@@ -31,4 +31,6 @@ The later Live implementation can replace only the `browser-engine` service and 
 
 For `handoff:true`, the app clicks a hidden `data-wizard-browse="auto"` anchor so Wizard opens the original immediately (phone: native browser; desktop: only while the owner's tap is fresh, else nothing opens and the visible "Open in your browser" remains). Opened from a link, Reader then returns the owner to where they tapped. Wizard remembers `blocked`/`signin`/`private` hostnames owner-locally to skip Reader for that host next time. `busy`/`invalid` never hand off. Operator logs record only reason and host for these refusals.
 
+Redirects: Chrome is never handed a 3xx. Playwright does not route the request that follows a fulfilled redirect, so before this fix it went to the deny proxy and every redirecting link (http→https, `wikipedia.org`→`en.wikipedia.org`, short links, sign-in walls) failed with `net::ERR_TUNNEL_CONNECTION_FAILED`. Subresources now follow in `safeFetch` (every hop through the destination guard); a main-document redirect aborts and Reader navigates again to the already-checked Location (at most five hops).
+
 Network/SSRF guard, deny hosts, sanitizer, CSP, edge allowlist and list CSRF are unchanged.
