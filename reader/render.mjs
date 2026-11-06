@@ -3,7 +3,9 @@ import dns from 'node:dns/promises';
 import {safeFetch,destination,UnsafeURL} from './network.mjs';
 import {extract} from './article.mjs';
 import {ReadFailure,documentVerdict} from './handoff.mjs';
+import {Activity} from './settle.mjs';
 
+const PIXEL=Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7','base64');
 let connection;
 export async function chrome() {
   if (!connection) connection=(async()=>{
@@ -16,7 +18,8 @@ export async function chrome() {
 }
 let active=0;
 export async function readArticle(input) {
-  await destination(input);
+  const t0=performance.now(), timing={};const mark=k=>{timing[k]=Math.round(performance.now()-t0);};
+  await destination(input);mark('checked');
   if(active>=2) throw new ReadFailure('Reader is busy. Please try again in a moment.','busy');
   active++;
   let context;
@@ -38,13 +41,19 @@ export async function readArticle(input) {
     const expire=()=>{void context.close().catch(()=>{});}; abort.signal.addEventListener('abort',expire,{once:true});
     await context.routeWebSocket('**/*',route=>route.close());
     let requests=0, bytes=0, reserved=0, running=0, blocked=null, verdict=null, hop=null;
+    const activity=new Activity();
     const waiting=[];
     const acquire=async()=>{if(running<4) {running++;return;} await new Promise(resolve=>waiting.push(resolve));};
     const release=()=>{const next=waiting.shift();if(next)next();else running--;};
     await context.route('**/*',async route=>{
       const req=route.request(); let reservation=0, acquired=false;
+      activity.start();
       try {
         if(abort.signal.aborted || ++requests>120 || req.method()!=='GET' || ['media','font'].includes(req.resourceType())) return await route.abort();
+        // Image bytes are never needed to read the article: extraction reads only their attributes, and the owner's
+        // copy loads each one later through api/image. Fetching them here held the page's own scripts behind 40+
+        // Wikipedia images. A blank pixel (not an error) keeps pages' onerror handlers from hiding real pictures.
+        if(req.resourceType()==='image') return await route.fulfill({status:200,headers:{'content-type':'image/gif','x-content-type-options':'nosniff'},body:PIXEL});
         await acquire(); acquired=true;
         if(abort.signal.aborted) return await route.abort();
         reservation=Math.min(8*1024*1024,32*1024*1024-bytes-reserved);
@@ -70,8 +79,9 @@ export async function readArticle(input) {
         if(e instanceof UnsafeURL && req.isNavigationRequest() && req.frame()===req.frame().page()?.mainFrame()) blocked=e;
         try{await route.abort();}catch{}
       }
-      finally {reserved-=reservation;if(acquired) release();}
+      finally {reserved-=reservation;if(acquired) release();activity.end();}
     });
+    mark('context');
     const page=await context.newPage(); page.setDefaultTimeout(20000);
     page.on('popup',p=>void p.close());
     // Commit the public URL before source JS can initiate client-side navigation.
@@ -88,10 +98,27 @@ export async function readArticle(input) {
       target=hop;
     }
     if (!response || response.status()>=400) throw new ReadFailure('This page is not available right now.','unavailable');
-    await page.waitForTimeout(1200);
-    await destination(page.url());
-    const html=await page.content();
-    if(Buffer.byteLength(html)>8*1024*1024) throw new Error('This page is too large for Reader.');
-    return extract(html,page.url());
-  } finally { clearTimeout(timer); abort.abort(); if(context) await context.close().catch(()=>{}); active--; }
+    mark('loaded');
+    // Up to the old fixed 1.2 s, shorter once the page's own requests are done and quiet.
+    const settled=await activity.settle({maxMs:1200});mark('settled');
+    const snapshot=async()=>{
+      await destination(page.url());
+      const html=await page.content();
+      if(Buffer.byteLength(html)>8*1024*1024) throw new Error('This page is too large for Reader.');
+      return extract(html,page.url());
+    };
+    let article;
+    try { article=await snapshot(); }
+    catch(e) {
+      // A quiet page whose scripts render on a timer: give it the rest of the old wait once, then read again.
+      if(!settled.quiet || e instanceof UnsafeURL || !/could not find an article/.test(e.message)) throw e;
+      await page.waitForTimeout(Math.max(0,1200-settled.waited));timing.retried=true;article=await snapshot();
+    }
+    mark('extracted');return article;
+  } finally {
+    clearTimeout(timer); abort.abort(); if(context) await context.close().catch(()=>{}); active--;
+    // Operator log: host and phase times only.
+    let host='';try{host=new URL(input).hostname;}catch{}
+    console.log('reader timing',host,JSON.stringify({...timing,total:Math.round(performance.now()-t0)}));
+  }
 }
