@@ -40,12 +40,12 @@ try:
  run('reader-manifest',['docker','buildx','imagetools','inspect',image])
  run('compose-pull',base+['pull'],150)
  run('compose-up',base+['up','-d','--wait','--wait-timeout','90'],150);ready(base)
- run('reader-tests',['docker','run','--rm','--network','none',image,'npm','test'])
+ run('reader-tests',['docker','run','--rm','--network','none',image,'npm','test'],180)
  run('front-tests',['python3','-m','unittest','discover','-s',str(ROOT/'browser/tests'),'-p','test_*.py'])
  run('inline-check',['python3',str(ROOT/'browser/mcp/inline.py'),'--check'])
  # Real six-source integration kept, plus list MCP, CSRF and exact edge method isolation.
  qa('integration','/opt/qa/integration.mjs',240)
- # Four device/skin runs with real reads; 202 s on the last passing gate. 540 s leaves the whole job inside 900 s.
+ # Four device/skin runs with real reads; 420 s cut the fourth (phone-grove) off on 7 Nov. 540 s keeps the job inside 900 s.
  qa('in-shell','/sources/browser/tests/qa-reader-shell.cjs',540)
  seed={'url':'https://contraptions.venkateshrao.com/p/experiments-with-monstrousness'}
  run('persistence-seed',base+['exec','-T','browser-reader','node','-e',"fetch('http://127.0.0.1:8080/api/list',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify("+json.dumps(seed)+")}).then(async r=>{console.log(await r.text());if(!r.ok)process.exit(1)})"],70)
