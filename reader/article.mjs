@@ -2,7 +2,7 @@ import {JSDOM} from 'jsdom';
 import createDOMPurify from 'dompurify';
 import {Readability} from '@mozilla/readability';
 import {DefuddleClass} from 'defuddle/node';
-import {DOMSelector} from '@asamuzakjp/dom-selector';
+import {install as fastSelectors} from './fast-select.mjs';
 import {webURL} from './network.mjs';
 
 const tags = ['picture','source','p','div','section','article','h1','h2','h3','h4','h5','h6','a','img','figure','figcaption','blockquote','ul','ol','li','strong','b','em','i','s','del','code','pre','kbd','br','hr','table','thead','tbody','tr','th','td','sup','sub','dl','dt','dd'];
@@ -47,17 +47,15 @@ export function extract(renderedHTML, finalURL) {
     // Use the Node entry point, but ONLY its synchronous DOM parser. Async site
     // extractors can fetch third-party APIs outside our guarded render transport.
     // Replies are not the article (notably GitHub bot reviews and comment tables).
-    const extractionDOM=new JSDOM(renderedHTML,{url:finalURL});
-    const extractionDoc=extractionDOM.window.document;
-    // Defuddle's built-in boilerplate selector list exceeds jsdom 30's 2 KiB
-    // per-selector default. Configure the SAME selector engine for this inert
-    // extraction window only (including Defuddle's clones). DOMPurify is unchanged.
-    const selectors=new DOMSelector(extractionDOM.window,extractionDoc,{maxLength:65536});
-    const prototype=extractionDOM.window.Document.prototype,queryAll=prototype.querySelectorAll;
-    prototype.querySelectorAll=function(selector) {return selector.length>2048 ? selectors.querySelectorAll(selector,this) : queryAll.call(this,selector);};
+    // Defuddle reads THIS document (metadata above is already taken) and parses its own clone, so a page is
+    // parsed once, not twice: the second parse was ~0.3-0.5 s of every Wikipedia read. Readability, the rare
+    // fallback, still receives an untouched DOM of its own below.
+    // Defuddle's built-in boilerplate selector list exceeds jsdom 30's 2 KiB per-selector default, and jsdom's
+    // engine is slow for its thousands of simple lookups: fast-select.mjs answers them exactly, in this inert
+    // extraction window only (including Defuddle's clones). DOMPurify and Readability are unchanged.
+    fastSelectors(dom.window);
     let result;
-    try { result=new DefuddleClass(extractionDoc,{url:finalURL,useAsync:false,includeReplies:new URL(finalURL).hostname==='github.com' ? false : 'extractors',markdown:false,fetch:()=>{throw new Error('Extraction cannot fetch');}}).parse(); } catch {}
-    finally {extractionDOM.window.close();}
+    try { result=new DefuddleClass(doc,{url:finalURL,useAsync:false,includeReplies:new URL(finalURL).hostname==='github.com' ? false : 'extractors',markdown:false,fetch:()=>{throw new Error('Extraction cannot fetch');}}).parse(); } catch {}
     const usable = html => {
       const fragment=JSDOM.fragment(html || '');
       return (fragment.textContent || '').trim().length>=150;
@@ -66,7 +64,9 @@ export function extract(renderedHTML, finalURL) {
     let extractor='defuddle';
     if (!usable(html)) {
       // Defuddle mutates its document; Readability must receive the original DOM.
-      const fallback=new Readability(doc,{maxElemsToParse:50000,charThreshold:150}).parse();
+      const fresh=new JSDOM(renderedHTML,{url:finalURL});
+      let fallback;
+      try { fallback=new Readability(fresh.window.document,{maxElemsToParse:50000,charThreshold:150}).parse(); } finally { fresh.window.close(); }
       result=fallback && {title:fallback.title,site:fallback.siteName,author:fallback.byline,published:fallback.publishedTime,description:fallback.excerpt};
       html=fallback?.content ? cleanArticle(fallback.content,finalURL) : '';
       extractor='readability';

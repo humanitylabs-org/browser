@@ -3,7 +3,7 @@
   'use strict';
   const $=s=>document.querySelector(s), input=$('#url'), status=$('#status'), page=$('#page'), body=$('#article');
   let sequence=0,pending=null,current='',article=null,stack=[],items=[],listEpoch=0,listKnown=false;
-  const saving=new Set();let retry=null;
+  const saving=new Set();let retry=null,linked=new URLSearchParams(location.search).get('url') || '';
   window.WizardApp?.ready({name:'Browser',version:'1.1.0'});
   const when=s=>{const d=new Date(s);return s && !isNaN(d) && /\d{4}-\d{2}-\d{2}/.test(s)?d.toLocaleDateString(undefined,{year:'numeric',month:'long',day:'numeric'}):(s||'');};
   const canonical=u=>{try{const v=new URL(u);v.hash='';return v.href;}catch{return u;}};
@@ -93,16 +93,34 @@
     status.textContent='Reading '+new URL(url).hostname+'…';status.hidden=false;page.hidden=false;savePaint();
     $('#title').textContent='';$('#site').textContent=new URL(url).hostname;$('#byline').textContent='';$('#logo').hidden=true;body.replaceChildren();original(url);
     pending?.abort();const control=new AbortController();pending=control;
+    const opened=remember && url===linked && stack.length===1 && stack[0]===null;linked='';
     try {
       const r=await fetch('api/reader?url='+encodeURIComponent(url),{signal:control.signal,cache:'no-store'});
       const data=await r.json();if(id!==sequence)return;
-      if(!r.ok)throw Error(data.error || 'Reader could not read this page.');
+      if(!r.ok){if(data.handoff===true && handoff(url,data.reason,data.error,opened))return;throw Error(data.error || 'Reader could not read this page.');}
       article=data;$('#title').textContent=data.title;document.title=data.title+' · Browser';$('#site').textContent=data.siteName;
       $('#byline').textContent=[data.byline,when(data.publishedTime)].filter(Boolean).join(' · ');
       original(data.url);$('#logo').hidden=!data.favicon;$('#logo').src=data.favicon || '';
       body.innerHTML=data.html;status.hidden=true;savePaint();
     }catch(e){if(id!==sequence || e.name==='AbortError')return;status.hidden=false;status.textContent=e.message+' You can open the original in your browser.';}
     finally{if(id===sequence)pending=null;}
+  }
+  /* Reader could not read it: open the original straight away instead of asking for a second tap (James, 7 Nov 2026).
+   * Wizard decides: the phone opens its browser at once; a desktop browser only while the owner's tap is fresh (no
+   * blocked popup). Declined, nothing opens and "Open in your browser" stays as the visible one-tap fallback. */
+  function handoff(url,reason,message,opened) {
+    if(!window.WizardApp?.hosted)return false;
+    const a=document.createElement('a');a.href=url;a.target='_blank';a.rel='noopener noreferrer';a.hidden=true;
+    a.dataset.wizardBrowse='auto';a.dataset.wizardReason=/^[a-z]{1,16}$/.test(reason || '')?reason:'unavailable';
+    // Wizard's link guard takes it with preventDefault() and may also stop propagation, so this target listener can
+    // be skipped: read the dispatch result, and only cancel the hidden link's own navigation when nobody took it.
+    let declined=false;a.addEventListener('click',e=>{if(!e.defaultPrevented){declined=true;e.preventDefault();}});
+    document.body.append(a);const notCancelled=a.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,button:0}));a.remove();
+    if(notCancelled || declined)return false;
+    status.hidden=false;status.textContent=(message || 'Reader could not read this page.')+' Opened the original in your browser.';
+    // Opened from a link: return to where the owner tapped it, as links did before Reader.
+    if(opened)window.WizardApp?.nav?.back?.();
+    return true;
   }
   $('#logo').addEventListener('error',()=>{$('#logo').hidden=true;});
   $('#address').addEventListener('submit',e=>{e.preventDefault();read(input.value.trim());});

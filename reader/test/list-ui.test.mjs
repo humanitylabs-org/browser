@@ -47,3 +47,40 @@ test('Reader domain URL follows home, next article and Back so same Search resul
 test('failed optimistic save rolls back with visible retry; saved state never lies after failure',async t=>{
  const a=await app(t),{$}=a;$('#save').click();assert.equal($('#save span').textContent,'Saved');await a.fail();assert.equal($('#save span').textContent,'Save');assert.equal($('#error').hidden,false);assert.match($('#error').textContent,/Unit offline/);$('#retry').click();assert.equal($('#save span').textContent,'Saved');await a.commit();assert.equal($('#error').hidden,true);
 });
+
+// James, 7 Nov 2026: a page Reader cannot read opens the original at once, without a second tap.
+async function failing(t,{take,stop=false,hosted=true,body={error:'This site does not let Reader in.',reason:'blocked',handoff:true}}={}) {
+ const url='https://www.reuters.com/world/story';
+ const dom=new JSDOM(html,{url:'https://wizard.test/browser/?url='+encodeURIComponent(url),runScripts:'outside-only'});t.after(()=>dom.window.close());const w=dom.window;const seen=[];let backs=0;
+ w.WizardApp={hosted,ready(){},back:{register(){}},update:{hold(){return {release(){}};}},nav:{back(){backs++;return true;}}};w.scrollTo=()=>{};
+ w.document.addEventListener('click',e=>{const a=e.target.closest('a[data-wizard-browse]');if(!a)return;seen.push([a.getAttribute('href'),a.dataset.wizardBrowse,a.dataset.wizardReason,a.target]);if(take)e.preventDefault();if(take&&stop)e.stopPropagation();},true);
+ w.fetch=async u=>u.startsWith('api/reader')?{ok:false,json:async()=>body}:{ok:true,json:async()=>({items:[]})};
+ w.eval(code);await turn();await turn();return {w,$:s=>w.document.querySelector(s),seen,backs:()=>backs,url};
+}
+test('Reader failure hands the original to Wizard at once and returns to the tapped link',async t=>{
+ const a=await failing(t,{take:true});
+ assert.deepEqual(a.seen,[[a.url,'auto','blocked','_blank']]);assert.equal(a.backs(),1);
+ assert.match(a.$('#status').textContent,/Opened the original in your browser/);
+ assert.equal(a.$('#original').getAttribute('href'),a.url,'Open in your browser stays as the visible fallback');
+ assert.equal(a.w.document.querySelectorAll('a[data-wizard-browse=auto]').length,0);
+});
+test('declined hand-off (desktop without a fresh tap) keeps one visible Open in your browser and never navigates',async t=>{
+ const a=await failing(t,{take:false});
+ assert.equal(a.seen.length,1);assert.equal(a.backs(),0);assert.equal(a.w.location.pathname,'/browser/');
+ assert.match(a.$('#status').textContent,/does not let Reader in\. You can open the original in your browser\./);
+ assert.equal(a.$('#page').hidden,false);assert.equal(a.$('#original').getAttribute('href'),a.url);
+});
+test('busy or non-hand-off failures never open anything',async t=>{
+ const a=await failing(t,{take:true,body:{error:'Reader is busy. Please try again in a moment.',reason:'busy',handoff:false}});
+ assert.equal(a.seen.length,0);assert.equal(a.backs(),0);assert.match(a.$('#status').textContent,/Reader is busy/);
+});
+test('standalone Reader (no Wizard host) keeps the old visible fallback',async t=>{
+ const a=await failing(t,{take:true,hosted:false});assert.equal(a.seen.length,0);assert.equal(a.backs(),0);
+});
+test('hand-off is taken even when the shell link guard also stops propagation (real WizLinks.guardFrame)',async t=>{
+ // The installed shell's capture listener calls preventDefault() AND stopPropagation(); the gate saw Reader keep its
+ // fallback page open over the chat on the phone because Reader's own target listener never ran.
+ const a=await failing(t,{take:true,stop:true});
+ assert.equal(a.seen.length,1);assert.equal(a.backs(),1,'returns to the tapped chat');
+ assert.match(a.$('#status').textContent,/Opened the original in your browser/);
+});

@@ -12,12 +12,17 @@ const search=JSON.parse(fs.readFileSync(path.join(QA,'search-web.json')));
 const target=search.results.find(r=>r.url==='https://en.wikipedia.org/wiki/Reading');
 assert.ok(target,'Recorded genuine Search result must include the article');
 const NOW=Date.now(),SID='reader_gate_thread';
-const MSG=`[Read the article](${target.url})\n\n[Internal Notes](/notes/)\n\n[Download PDF](https://download.example/reader.pdf) · [Download APK](https://download.example/reader.apk)`;
+// James, 7 Nov 2026: real bot-walled hosts (chosen at start from what the real Reader refuses from this network) and a
+// Wizard own page. Neither may need a second tap; the own page never reaches Reader.
+const BLOCK_CANDIDATES=['https://www.reddit.com/r/programming/','https://www.reuters.com/world/','https://www.ddproperty.com/en/property-for-sale'];
+const OWN='https://wizard.aiwizards.com/clips-pipeline/#/clip/pod-2026-09-25-03-agency-small-wins';
+let BLOCKED=BLOCK_CANDIDATES[0],BLOCKED2=BLOCKED+'?second=1',MSG='';
+const message=()=>`[Read the article](${target.url})\n\n[Internal Notes](/notes/)\n\n[Download PDF](https://download.example/reader.pdf) · [Download APK](https://download.example/reader.apk)\n\n[Blocked news](${BLOCKED}) · [Blocked again](${BLOCKED2})\n\n[Wizard clip](${OWN})`;
 const apps=[{id:'browser',name:'Browser',url:'/browser/',source:'apps.json',type:'service',provides:['browser']},{id:'wizard-search',name:'Search',url:'/search/',source:'apps.json',type:'service',provides:['web-search','image-search']},{id:'notes',name:'Notes',url:'/notes/',source:'apps.json',type:'service',provides:['note-taking']}];
-const row={id:SID,title:'Reader release acceptance',agent:'hermes',status:'completed',message_count:2,last_active:new Date(NOW).toISOString(),wizard_activity_at:new Date(NOW).toISOString(),wizard_last_assistant_at:new Date(NOW).toISOString(),latest_message:{role:'assistant',content:MSG,timestamp:NOW/1000}};
+let row;const makeRow=()=>({id:SID,title:'Reader release acceptance',agent:'hermes',status:'completed',message_count:2,last_active:new Date(NOW).toISOString(),wizard_activity_at:new Date(NOW).toISOString(),wizard_last_assistant_at:new Date(NOW).toISOString(),latest_message:{role:'assistant',content:MSG,timestamp:NOW/1000}});
 const TYPES={'.css':'text/css','.html':'text/html','.js':'application/javascript','.json':'application/json','.png':'image/png','.jpg':'image/jpeg','.webp':'image/webp','.svg':'image/svg+xml','.woff2':'font/woff2','.webmanifest':'application/manifest+json'};
-const results=[],diagnostics=[];let browser;
-const save=()=>fs.writeFileSync(path.join(OUT,process.env.PERSISTENCE_ONLY?'in-shell-persistence-results.json':'in-shell-results.json'),JSON.stringify({kind:'composed-real-shell-reader',source,searchProvenance:'search-preview e429987349b87d0c6d4973fb482c604765e2434b; real /api/web result recorded from installed provider; only owner APIs synthetic',results,diagnostics},null,2));
+const results=[],diagnostics=[];let browser,blockedChoice=null;
+const save=()=>fs.writeFileSync(path.join(OUT,process.env.PERSISTENCE_ONLY?'in-shell-persistence-results.json':'in-shell-results.json'),JSON.stringify({kind:'composed-real-shell-reader',source,blockedChoice,searchProvenance:'search-preview e429987349b87d0c6d4973fb482c604765e2434b; real /api/web result recorded from installed provider; only owner APIs synthetic',results,diagnostics},null,2));
 async function test(name,fn,p){try{const data=await fn();results.push({name,ok:true,...(data||{})});console.log('PASS',name);}catch(e){const failure={name,ok:false,error:String(e),stack:e.stack};if(p){failure.frames=await Promise.all(p.frames().filter(f=>f.url().startsWith(ORIGIN)).map(async f=>({url:f.url(),state:await f.evaluate(()=>({title:document.title,status:document.querySelector('#status')?.textContent,error:document.querySelector('#error')?.textContent,pageHidden:document.querySelector('#page')?.hidden,save:document.querySelector('#save')?.outerHTML,reviewCoach:!!document.querySelector('.rv-coach.open')})).catch(()=>null)})));await p.screenshot({path:path.join(OUT,name.replace(/[^a-z0-9]/gi,'-')+'-failure.png')}).catch(()=>{});}results.push(failure);console.log('FAIL',name,String(e));}save();}
 async function boot(phone,skin){
  const ctx=await browser.newContext({viewport:phone?{width:390,height:844}:{width:1440,height:900},deviceScaleFactor:1,isMobile:phone,hasTouch:phone,serviceWorkers:'block',userAgent:phone?'Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 Chrome/155.0.0.0 Mobile Safari/537.36 WizardOS-Android/0.10.9':undefined});
@@ -34,8 +39,8 @@ async function boot(phone,skin){
     const upstream='http://reader-edge:8080'+u.pathname+u.search;
     const headers={'x-forwarded-for':'100.64.10.20','x-forwarded-proto':'http',host:u.host,'accept-encoding':'identity'};
     const actual=await q.allHeaders();for(const k of ['origin','sec-fetch-site','content-type'])if(actual[k])headers[k]=actual[k];
-    const res=await proxyRequest(upstream,{method:m,headers,...(m==='GET'?{}:{body:q.postDataBuffer()})});
-    if(u.pathname.includes('/api/'))d.readerTraffic.push({method:m,path:u.pathname+u.search,host:headers.host,origin:headers.origin,fetchSite:headers['sec-fetch-site'],status:res.status,...(res.status>=400?{error:res.body.toString().slice(0,2000)}:{})});
+    const t0=Date.now(),res=await proxyRequest(upstream,{method:m,headers,...(m==='GET'?{}:{body:q.postDataBuffer()})});
+    if(u.pathname.includes('/api/'))d.readerTraffic.push({method:m,path:u.pathname+u.search,host:headers.host,origin:headers.origin,fetchSite:headers['sec-fetch-site'],status:res.status,ms:Date.now()-t0,...(res.status>=400?{error:res.body.toString().slice(0,2000)}:{})});
     return r.fulfill({status:res.status,headers:Object.fromEntries(Object.entries(res.headers).filter(([k])=>!['content-length','transfer-encoding','connection','content-encoding'].includes(k))),body:res.body});
    }
    if(u.pathname.startsWith('/wizard-os-home/')){
@@ -85,12 +90,21 @@ async function boot(phone,skin){
  return {ctx,p,d,hold:()=>{hold=true;},unhold:()=>{hold=false;release?.();release=null;},holdList:()=>{listHold=true;},unholdList:()=>{listHold=false;listRelease?.();listRelease=null;}};
 }
 async function chat(p,phone){await p.evaluate(({SID,phone})=>{const a=window.__wux||window.__wos;if(!phone)a.openThread(SID);else {const w=Object.values(a.wins).find(w=>w.app==='chats');a.goDesk(a.desks.findIndex(d=>d.wins.includes(w.id)));a.chats.openChat(w.id,SID);}}, {SID,phone});await p.locator(`.bub a[href="${target.url}"]`).first().waitFor({state:'visible'});}
-const frame=p=>p.frames().find(f=>new URL(f.url()||ORIGIN).pathname.startsWith('/browser/'));
-async function reader(p){await p.waitForFunction(()=>[...document.querySelectorAll('iframe')].some(f=>f.src.includes('/browser/?url=')));const until=Date.now()+10000;while(Date.now()<until){const f=frame(p);if(f){await f.locator('#status').waitFor({state:'attached'});return f;}await new Promise(r=>setTimeout(r,50));}throw Error('Reader frame did not load');}
+// The newest Reader frame (a stale one left behind must never answer for a fresh tap).
+const frame=p=>p.frames().filter(f=>{try{return new URL(f.url()||ORIGIN).pathname.startsWith('/browser/');}catch{return false;}}).at(-1);
+const readerFor=(p,url)=>p.frames().find(f=>{try{const u=new URL(f.url()||ORIGIN);return u.pathname.startsWith('/browser/')&&u.searchParams.get('url')===url;}catch{return false;}});
+// Reader frames still on screen for a link (after a hand-off James must be back in the chat, not on Reader).
+const readerShown=(p,url)=>p.evaluate(url=>[...document.querySelectorAll('iframe')].some(f=>{let u;try{u=new URL(f.src,location.href);}catch{return false;}if(!u.pathname.startsWith('/browser/')||u.searchParams.get('url')!==url)return false;const r=f.getBoundingClientRect();return r.width>0&&r.height>0&&getComputedStyle(f).visibility!=='hidden';}),url);
+async function reader(p,url){await p.waitForFunction(()=>[...document.querySelectorAll('iframe')].some(f=>f.src.includes('/browser/?url=')));const until=Date.now()+10000;while(Date.now()<until){const f=url?readerFor(p,url):frame(p);if(f){await f.locator('#status').waitFor({state:'attached'});return f;}await new Promise(r=>setTimeout(r,50));}throw Error('Reader frame did not load');}
 async function readDone(f){await f.waitForFunction(()=>document.querySelector('#status').hidden,null,{timeout:45000});assert.ok((await f.locator('#article').innerText()).length>150);}
 async function back(p,phone){if(phone)await p.evaluate(()=>__wos.onBack());else await p.keyboard.press('Escape');await p.waitForTimeout(400);}
 (async()=>{fs.mkdirSync(OUT,{recursive:true});try{
  // Chrome's DevTools rejects non-IP Host headers (HTTP 500); connect by IP like Reader's own chrome().
+ // Pick a host the real Reader refuses as a bot wall from this network (GET only, no list write).
+ const tried=[];for(const url of BLOCK_CANDIDATES){const t0=Date.now();const r=await proxyRequest('http://reader-edge:8080/browser/api/reader?url='+encodeURIComponent(url),{headers:{'x-forwarded-for':'100.64.10.20','x-forwarded-proto':'http',host:new URL(ORIGIN).host,'accept-encoding':'identity'}});let body={};try{body=JSON.parse(r.body.toString());}catch{}tried.push({url,status:r.status,reason:body.reason,handoff:body.handoff,ms:Date.now()-t0});if(body.handoff===true&&['blocked','signin'].includes(body.reason)){BLOCKED=url;break;}}
+ blockedChoice={chosen:BLOCKED,tried};assert.ok(tried.some(t=>t.url===BLOCKED&&['blocked','signin'].includes(t.reason)),'No candidate is refused by the real Reader here: '+JSON.stringify(tried));
+ assert.ok(tried.find(t=>t.url===BLOCKED).ms<3000,'bot wall must fail fast: '+JSON.stringify(tried));
+ BLOCKED2=BLOCKED+'?second=1';MSG=message();row=makeRow();
  browser=await chromium.connectOverCDP('http://'+(await require('dns').promises.lookup('browser-engine')).address+':9222');
  for(const phone of [false,true])for(const skin of ['nebula','grove']){
   const tag=(phone?'phone':'desktop')+'-'+skin;let h;
@@ -138,7 +152,49 @@ async function back(p,phone){if(phone)await p.evaluate(()=>__wos.onBack());else 
    await test(tag+'-back-closes-not-exits',async()=>{const url=p.url();await back(p,phone);assert.equal(p.url(),url);await frame(p).locator('#library').waitFor({state:'visible'});await back(p,phone);await p.locator(`.bub a[href="${target.url}"]`).first().waitFor({state:'visible'});assert.equal(ctx.pages().length,1);return{outerUrl:p.url()};},p);
    await test(tag+'-pdf-apk-download',async()=>{const downloaded=[];for(const ext of ['pdf','apk']){if(phone)await p.locator(`.bub a[href$=".${ext}"]`).first().click();else{const pending=p.waitForEvent('download');await p.locator(`.bub a[href$=".${ext}"]`).first().click();const file=await pending;assert.equal(file.suggestedFilename(),'reader.'+ext);assert.equal(await file.failure(),null);downloaded.push(file.suggestedFilename());}}const calls=await p.evaluate(()=>__qaNative);if(phone){assert.ok(calls.some(c=>c[0]==='download'&&c[1].endsWith('.pdf')),JSON.stringify(calls));assert.ok(calls.some(c=>c[0]==='download'&&c[1].endsWith('.apk')),JSON.stringify(calls));}else assert.deepEqual(downloaded,['reader.pdf','reader.apk']);return{nativeDownloads:calls,browserDownloads:downloaded};},p);
    await test(tag+'-internal-link-unchanged',async()=>{await p.locator('.bub a[href="/notes/"]').first().click();await p.waitForFunction(()=>[...document.querySelectorAll('iframe')].some(f=>new URL(f.src).pathname==='/notes/'));assert.ok(!p.frames().some(f=>new URL(f.url()||ORIGIN).pathname==='/browser/'&&new URL(f.url()).searchParams.get('url')?.includes('/notes/')));await p.screenshot({path:path.join(OUT,tag+'-internal-notes.png')});await back(p,phone);},p);
-   await test(tag+'-genuine-search-result-tap',async()=>{await p.evaluate(phone=>{const a=window.__wux||window.__wos;a.openApp(WizCore.apps(phone?'mobile':'desktop').APP['wizard-search']);},phone);await p.waitForFunction(()=>[...document.querySelectorAll('iframe')].some(f=>f.src.includes('/search/')));const until=Date.now()+10000;let f;while(!f&&Date.now()<until){f=p.frames().find(f=>f.url().includes('/search/'));await p.waitForTimeout(50);}assert.ok(f);await f.locator('#q').fill('Wikipedia Reading');await f.locator('#q').press('Enter');await f.locator(`#web a[href="${target.url}"]`).waitFor({state:'visible'});await p.screenshot({path:path.join(OUT,tag+'-search-results.png')});const pagesBefore=ctx.pages().length;await f.locator(`#web a[href="${target.url}"]`).click();const rf=await reader(p);await readDone(rf);await p.screenshot({path:path.join(OUT,tag+'-search-reader.png')});assert.equal(ctx.pages().length,pagesBefore,'Search result tap must not open a new tab');return{url:target.url,title:await rf.locator('#title').innerText(),provider:search.source};},p);
+   await test(tag+'-chat-tap-blocked-host-one-tap',async()=>{
+    await p.evaluate(()=>{localStorage.removeItem('wos.readerDirect.v1');__qaNative.length=0;});await chat(p,phone);
+    // Earlier PDF/APK download tests legitimately leave their own tabs: count only what THIS tap opens.
+    const pagesBefore=ctx.pages().length;
+    const link=p.locator(`.bub a[href="${BLOCKED}"]`).first();await link.waitFor({state:'visible'});
+    const before=d.readerTraffic.length,popup=phone?null:ctx.waitForEvent('page',{timeout:20000}),t0=Date.now();
+    await link.click();
+    if(phone)await p.waitForFunction(u=>__qaNative.some(c=>c[0]==='browser'&&c[1]===u),BLOCKED,{timeout:20000});
+    else{const pg=await popup;assert.equal(ctx.pages().length,pagesBefore+1,'desktop: exactly one new tab for the original');await p.waitForTimeout(300);await pg.close();}
+    const handoffMs=Date.now()-t0;
+    const api=d.readerTraffic.slice(before).filter(r=>r.path.startsWith('/browser/api/reader'));
+    assert.equal(api.length,1,JSON.stringify(api));assert.equal(api[0].status,422);const body=JSON.parse(api[0].error);
+    assert.ok(body.handoff===true&&['blocked','signin'].includes(body.reason),JSON.stringify(body));assert.ok(api[0].ms<3000,'bot wall must fail in ~1 s: '+api[0].ms);
+    if(!phone)assert.ok(d.foreign.some(u=>u===BLOCKED),'desktop opened the original tab on the first tap: '+JSON.stringify(d.foreign));
+    // Opened from a chat link: the owner is back where they tapped, as before Reader (phone: the Reader desk closed;
+    // desktop: the Reader preview window closed), with no Reader fallback page left on screen.
+    await p.locator(`.bub a[href="${BLOCKED}"]`).first().waitFor({state:'visible',timeout:10000});
+    await p.waitForFunction(u=>![...document.querySelectorAll('iframe')].some(f=>{let x;try{x=new URL(f.src,location.href);}catch{return false;}const r=f.getBoundingClientRect();return x.pathname.startsWith('/browser/')&&x.searchParams.get('url')===u&&r.width>0&&r.height>0;}),BLOCKED,{timeout:5000});
+    assert.equal(await readerShown(p,BLOCKED),false,'Reader must not stay open after the hand-off');await p.waitForTimeout(400);
+    await p.screenshot({path:path.join(OUT,tag+'-blocked-handoff.png')});
+    const stored=await p.evaluate(()=>JSON.parse(localStorage.getItem('wos.readerDirect.v1')||'{}'));assert.deepEqual(Object.keys(stored),[new URL(BLOCKED).hostname]);
+    // Next link to that host: straight to the browser, Reader is not asked again.
+    const before2=d.readerTraffic.length,popup2=phone?null:ctx.waitForEvent('page',{timeout:10000}),t1=Date.now();
+    await p.locator(`.bub a[href="${BLOCKED2}"]`).first().click();
+    if(phone)await p.waitForFunction(u=>__qaNative.some(c=>c[0]==='browser'&&c[1]===u),BLOCKED2,{timeout:10000});else{const pg=await popup2;assert.equal(ctx.pages().length,pagesBefore+1);await pg.close();}
+    const directMs=Date.now()-t1;assert.equal(d.readerTraffic.slice(before2).filter(r=>r.path.startsWith('/browser/api/reader')).length,0);
+    assert.equal(await readerShown(p,BLOCKED2),false);
+    assert.equal(ctx.pages().length,pagesBefore,'every tab this test opened is closed; none other appeared');return{blocked:BLOCKED,reason:body.reason,readerMs:api[0].ms,handoffMs,directMs,native:await p.evaluate(()=>__qaNative.slice())};
+   },p);
+   await test(tag+'-chat-tap-wizard-own-page-skips-reader',async()=>{
+    // Each step starts from the chat (a failed step before must not cover this link).
+    await chat(p,phone);await p.evaluate(()=>{__qaNative.length=0;});const before=d.readerTraffic.length,foreign=d.foreign.length,pagesBefore=ctx.pages().length;
+    const popup=phone?null:ctx.waitForEvent('page',{timeout:10000});
+    await p.locator(`.bub a[href="${OWN}"]`).first().click();
+    // Pre-Reader behaviour for another origin: phone hands it to the native browser, desktop opens one new tab.
+    if(phone)await p.waitForFunction(u=>__qaNative.some(c=>c[0]==='browser'&&c[1]===u),OWN,{timeout:10000});else{const pg=await popup;assert.equal(ctx.pages().length,pagesBefore+1);await p.waitForTimeout(300);await pg.close();}
+    assert.equal(d.readerTraffic.slice(before).filter(r=>r.path.startsWith('/browser/api/reader')).length,0,'Wizard own page must never reach Reader');
+    assert.ok(!p.frames().some(f=>{try{return (new URL(f.url()).searchParams.get('url')||'').includes('wizard.aiwizards.com');}catch{return false;}}));
+    if(!phone)assert.ok(d.foreign.slice(foreign).some(u=>u.startsWith('https://wizard.aiwizards.com/clips-pipeline/')),JSON.stringify(d.foreign.slice(foreign)));
+    await p.screenshot({path:path.join(OUT,tag+'-own-page-direct.png')});assert.equal(ctx.pages().length,pagesBefore);
+    return{own:OWN,native:await p.evaluate(()=>__qaNative.slice())};
+   },p);
+   await test(tag+'-genuine-search-result-tap',async()=>{await p.evaluate(phone=>{const a=window.__wux||window.__wos;a.openApp(WizCore.apps(phone?'mobile':'desktop').APP['wizard-search']);},phone);await p.waitForFunction(()=>[...document.querySelectorAll('iframe')].some(f=>f.src.includes('/search/')));const until=Date.now()+10000;let f;while(!f&&Date.now()<until){f=p.frames().find(f=>f.url().includes('/search/'));await p.waitForTimeout(50);}assert.ok(f);await f.locator('#q').fill('Wikipedia Reading');await f.locator('#q').press('Enter');await f.locator(`#web a[href="${target.url}"]`).waitFor({state:'visible'});await p.screenshot({path:path.join(OUT,tag+'-search-results.png')});const pagesBefore=ctx.pages().length;await f.locator(`#web a[href="${target.url}"]`).click();const t0=Date.now();const rf=await reader(p,target.url);await readDone(rf);const readMs=Date.now()-t0;await p.screenshot({path:path.join(OUT,tag+'-search-reader.png')});assert.equal(ctx.pages().length,pagesBefore,'Search result tap must not open a new tab');return{url:target.url,title:await rf.locator('#title').innerText(),provider:search.source,readMs};},p);
    await test(tag+'-defuddle-real-articles',async()=>{
     const f=frame(p);assert.ok(f);const pages=[];
     await p.evaluate(skin=>WosSkin.set(skin),skin);

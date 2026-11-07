@@ -72,6 +72,15 @@ try {
      return {observed,disposableContextsClosed:true,agentCookieRetained:true};
    } finally {await agent.clearCookies({name:'wizard_reader_test'});await cdp.detach();}
  });
+ await record('redirecting-links-read',async()=>{
+   // Live 7 Nov 2026: every redirecting link failed (ERR_TUNNEL_CONNECTION_FAILED). Real public redirects must read.
+   const rows=[];
+   for(const url of ['http://en.wikipedia.org/wiki/Reading','https://wikipedia.org/wiki/Reading','http://github.com/humanitylabs-org']){
+     const t0=Date.now(),r=await fetch(origin+'/api/reader?url='+encodeURIComponent(url));const body=await r.json();
+     rows.push({url,status:r.status,final:body.url,reason:body.reason,ms:Date.now()-t0});
+     if(r.status!==200 || !/^https:\/\//.test(body.url) || !(body.html||'').length)throw Error(JSON.stringify(rows));
+   }return {rows};
+ });
  await record('api-ssrf',async()=>{
    const blocked=[];
    for(const url of ['http://127.0.0.1','http://localhost','http://169.254.169.254/latest/meta-data','http://10.2.3.4','http://100.64.1.1','http://browser-engine','file:///etc/passwd','http://127.0.0.1.nip.io/','http://10-2-3-4.sslip.io/']){
